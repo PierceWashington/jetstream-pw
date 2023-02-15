@@ -3,9 +3,9 @@ services:
   jetstream:
     build: .
     init: true
-    depends_on:
-      db:
-        condition: service_healthy
+    #depends_on:
+    #  db:
+    #    condition: service_healthy
     environment:
       NODE_ENV: production
       ENVIRONMENT: production
@@ -58,17 +58,17 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile.db-migration
-    depends_on:
-      db:
-        condition: service_healthy
+    #depends_on:
+    #  db:
+    #    condition: service_healthy
     environment:
       NODE_ENV: production
       ENVIRONMENT: production
       JESTREAM_POSTGRES_DBURI: postgres://dbuser:dbpass@pgdb:5432/postgres
 
-volumes:
-  db:
-    driver: local
+#volumes:
+#  db:
+#    driver: local
 
 networks:
   backend:
