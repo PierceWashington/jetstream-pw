@@ -14,17 +14,23 @@ FROM node:16
 WORKDIR /usr/src/app
 
 # Copy application
-COPY ./dist/apps/api ./dist/apps/api/
-COPY ./dist/apps/jetstream ./dist/apps/jetstream/
-COPY ./dist/apps/download-zip-sw ./dist/apps/download-zip-sw/
-COPY ./dist/apps/landing ./dist/apps/landing/
+# COPY ./dist/apps/api ./dist/apps/api/
+# COPY ./dist/apps/jetstream ./dist/apps/jetstream/
+# COPY ./dist/apps/download-zip-sw ./dist/apps/download-zip-sw/
+# COPY ./dist/apps/landing ./dist/apps/landing/
 
 # Copy supporting files
-COPY ./dist/apps/api/package.json .
-COPY ./yarn.lock .
-COPY ./.env .
-COPY ./ecosystem.config.js .
-COPY ./prisma ./prisma/
+# COPY ./dist/apps/api/package.json .
+# COPY ./yarn.lock .
+# COPY ./.env .
+# COPY ./ecosystem.config.js .
+# COPY ./prisma ./prisma/
+
+# Install
+RUN yarn install
+
+# Build
+RUN yarn build
 
 # Install core dependencies
 RUN yarn
