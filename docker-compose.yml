@@ -64,10 +64,12 @@ services:
     #depends_on:
     #  db:
     #    condition: service_healthy
-    environment:
-      NODE_ENV: production
-      ENVIRONMENT: production
-      JESTREAM_POSTGRES_DBURI: '${JESTREAM_POSTGRES_DBURI}'
+    # environment:
+    #   NODE_ENV: production
+    #   ENVIRONMENT: production
+    #   JESTREAM_POSTGRES_DBURI: '${JESTREAM_POSTGRES_DBURI}'
+    env_file:
+      - mcomp.env
     networks:
       - backend
 
