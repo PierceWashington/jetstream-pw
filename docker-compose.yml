@@ -66,6 +66,8 @@ services:
       NODE_ENV: production
       ENVIRONMENT: production
       JESTREAM_POSTGRES_DBURI: postgres://dbuser:dbpass@pgdb:5432
+    networks:
+      - backend
 
 #volumes:
 #  db:
