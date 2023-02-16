@@ -1,5 +1,5 @@
 module.exports = {
-  siteUrl: 'https://getjetstream.app',
+  siteUrl: 'http://jetstream.murphy.computer',
   sourceDir: 'dist/apps/landing/.next',
   outDir: 'dist/apps/landing/exported',
 

@@ -1,12 +1,12 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
-  "npmScope": "jetstream",
+  "npmScope": "jetstream-pw",
   "tasksRunnerOptions": {
     "default": {
       "runner": "@nrwl/nx-cloud",
       "options": {
-        "accessToken": "NDcxN2FmMjEtMTA5Ni00NmQxLWFkZGUtY2ZkZGE0ZjA1OWQxfHJlYWQtd3JpdGU=",
         "cacheableOperations": ["build", "test", "lint", "e2e", "e2e-ci"],
+        "accessToken": "OWRiY2YyNjAtMzk1Ny00MzI4LTg2NTYtYjFiNmYwZjQyZmY5fHJlYWQtd3JpdGU=",
         "canTrackAnalytics": true,
         "showUsageWarnings": true,
         "useDaemonProcess": true,
@@ -17,7 +17,7 @@
   "affected": {
     "defaultBase": "master"
   },
-  "defaultProject": "jetstream",
+  "defaultProject": "jetstream-pw",
   "generators": {
     "@nrwl/workspace": {
       "library": {

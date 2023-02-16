@@ -1,9 +1,9 @@
 {
-  "name": "jetstream",
+  "name": "jetstream-pw",
   "description": "The Jetstream platform makes managing your Salesforce instances a breeze. Use Jetstream to work with your data and metadata to get your work done faster.",
   "repository": {
     "type": "git",
-    "url": "https://github.com/jetstreamapp/jetstream"
+    "url": "https://github.com/piercewashington/jetstream-pw"
   },
   "author": "Jetstream",
   "version": "2.2.0",
@@ -121,7 +121,7 @@
     "@nrwl/js": "15.4.1",
     "@nrwl/next": "15.4.1",
     "@nrwl/node": "15.4.1",
-    "@nrwl/nx-cloud": "^15.0.2",
+    "@nrwl/nx-cloud": "^15.0.3",
     "@nrwl/nx-plugin": "15.4.1",
     "@nrwl/react": "15.4.1",
     "@nrwl/storybook": "15.4.1",

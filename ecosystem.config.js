@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'jetstream',
+      name: 'jetstream-pw',
       script: 'dist/apps/api/main.js',
       exec_mode: 'cluster',
       instances: -1,
