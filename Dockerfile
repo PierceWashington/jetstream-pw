@@ -26,6 +26,9 @@ WORKDIR /usr/src/app
 # COPY ./ecosystem.config.js .
 # COPY ./prisma ./prisma/
 
+# COPY source
+COPY ./* ./
+
 # Install
 RUN yarn install
 
