@@ -142,7 +142,7 @@ app.use(setApplicationCookieMiddleware);
 passport.use(
   'custom',
   new CustomStrategy(function (req, callback) {
-    if ((req.hostname !== 'localhost' && req.hostname !== ENV.JETSTREAM_SERVER_DOMAIN) || !ENV.EXAMPLE_USER_OVERRIDE || !ENV.EXAMPLE_USER) {
+    if (req.hostname !== 'localhost' || !ENV.EXAMPLE_USER_OVERRIDE || !ENV.EXAMPLE_USER) {
       return callback(new Error('Test user not enabled'));
     }
 
