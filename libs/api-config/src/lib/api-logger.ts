@@ -18,9 +18,13 @@ export const logger = createLogger({
     new transports.Console({
       format: format.combine(format.colorize(), format.simple()),
     }),
+    new transports.File({
+      filename: './logs/debug.log',
+      level: 'debug',
+    }),
   ],
   // TODO: put this in a shared mounted directory
-  // exceptionHandlers: [new transports.File({ filename: './logs/unhandled-exceptions.log', level: 'error' })],
+  exceptionHandlers: [new transports.File({ filename: './logs/unhandled-exceptions.log', level: 'error' })],
   // this is in docs but not typescript definition?
   // rejectionHandlers: [
   //   new transports.File({ filename: 'unhandled-exceptions.log'}),
