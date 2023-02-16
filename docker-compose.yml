@@ -9,7 +9,7 @@ services:
     environment:
       NODE_ENV: production
       ENVIRONMENT: production
-      JESTREAM_POSTGRES_DBURI: postgres://dbuser:dbpass@pgdb:5432/postgres
+      JESTREAM_POSTGRES_DBURI: postgres://dbuser:dbpass@pgdb:5432
       JESTREAM_SESSION_SECRET: '${JESTREAM_SESSION_SECRET}'
       JETSTREAM_CLIENT_URL: http://localhost:3333/app
       JETSTREAM_SERVER_DOMAIN: localhost:3333
@@ -64,7 +64,7 @@ services:
     environment:
       NODE_ENV: production
       ENVIRONMENT: production
-      JESTREAM_POSTGRES_DBURI: postgres://dbuser:dbpass@pgdb:5432/postgres
+      JESTREAM_POSTGRES_DBURI: postgres://dbuser:dbpass@pgdb:5432
 
 #volumes:
 #  db:
