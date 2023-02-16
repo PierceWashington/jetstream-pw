@@ -27,7 +27,7 @@ WORKDIR /usr/src/app
 # COPY ./prisma ./prisma/
 
 # COPY source
-COPY ./* ./
+COPY ./ ./
 
 # Install
 RUN yarn install
