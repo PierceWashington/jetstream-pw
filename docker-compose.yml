@@ -1,6 +1,6 @@
 version: '3.8'
 services:
-  jetstream:
+  core:
     build: .
     init: true
     #depends_on:
@@ -34,8 +34,6 @@ services:
     #  - db
     networks:
       - backend
-    volumes:
-      - .:/usr/src/app
   #db:
   #  image: postgres:14.1-alpine
   #  restart: always

@@ -11,6 +11,7 @@
 
 FROM node:16
 
+ADD . /usr/src/app
 WORKDIR /usr/src/app
 
 # Copy application
@@ -42,7 +43,7 @@ RUN yarn add dotenv prisma@^3.13.0
 # RUN npx prisma generate
 
 # Build
-RUN yarn build:docker
+RUN yarn run build:docker
 
 EXPOSE 3333
 EXPOSE 9229
