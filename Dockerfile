@@ -33,7 +33,7 @@ COPY ./* ./
 RUN yarn install
 
 # Build
-RUN yarn build
+RUN yarn build:docker
 
 # Install core dependencies
 RUN yarn
