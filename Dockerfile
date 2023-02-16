@@ -32,17 +32,17 @@ COPY ./* ./
 # Install
 RUN yarn install
 
-# Build
-RUN yarn build:docker
-
 # Install core dependencies
-RUN yarn
+# RUN yarn
 
 # Install other dependencies that were not calculated by nx, but are required
 RUN yarn add dotenv prisma@^3.13.0
 
 # Generate prisma client - ensure that there are no OS differences
-RUN npx prisma generate
+# RUN npx prisma generate
+
+# Build
+RUN yarn build:docker
 
 EXPOSE 3333
 EXPOSE 9229
