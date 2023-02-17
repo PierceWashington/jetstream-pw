@@ -36,7 +36,7 @@ const sessionMiddleware = session({
     // httpOnly: true,
     secure: environment.production,
     maxAge: 1000 * 60 * 60 * 24 * SESSION_EXP_DAYS,
-    // sameSite: false,
+    sameSite: false,
     // sameSite: 'strict',
   },
   secret: ENV.JESTREAM_SESSION_SECRET,
