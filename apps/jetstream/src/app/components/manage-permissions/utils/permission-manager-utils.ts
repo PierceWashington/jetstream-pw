@@ -32,10 +32,10 @@ export type FilterFunctionFactoryOptions = {
   editableOnly?: boolean;
 };
 
-export function filterPermissionsSobjectsFactory(options: FilterFunctionFactoryOptions = { editableOnly: true }) {
+export function filterPermissionsSobjectsFactory(options?: FilterFunctionFactoryOptions) {
   return (sobject: DescribeGlobalSObjectResult) => {
     return (
-      (!options.editableOnly || (sobject.createable && sobject.updateable)) &&
+      (!(options?.editableOnly ?? true) || (sobject.createable && sobject.updateable)) &&
       !sobject.name.endsWith('__History') &&
       !sobject.name.endsWith('__Tag') &&
       !sobject.name.endsWith('__Share')
