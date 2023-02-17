@@ -26,6 +26,7 @@ export interface ConnectedSobjectListMultiSelectProps {
   allowSelectAll?: boolean;
   retainSelectionOnRefresh?: boolean;
   filterFn?: (sobject: DescribeGlobalSObjectResult) => boolean;
+  filterFnFactory?: (params?: { editableOnly?: boolean }) => (sobject: DescribeGlobalSObjectResult) => boolean;
   onSobjects: (sobjects: DescribeGlobalSObjectResult[]) => void;
   onSelectedSObjects: (selectedSObjects: string[]) => void;
   onRefresh?: () => void;
@@ -38,7 +39,8 @@ export const ConnectedSobjectListMultiSelect: FunctionComponent<ConnectedSobject
   selectedSObjects,
   allowSelectAll,
   retainSelectionOnRefresh,
-  filterFn = filterSobjectFn,
+  filterFn,
+  filterFnFactory,
   onSobjects,
   onSelectedSObjects,
   onRefresh,
@@ -61,6 +63,13 @@ export const ConnectedSobjectListMultiSelect: FunctionComponent<ConnectedSobject
 
   const loadObjects = useCallback(async () => {
     const uniqueId = selectedOrg.uniqueId;
+    if (!filterFn) {
+      if (filterFnFactory) {
+        filterFn = filterFnFactory();
+      } else {
+        filterFn = filterSobjectFn;
+      }
+    }
     try {
       setLoading(true);
       const resultsWithCache = await describeGlobal(selectedOrg);
@@ -105,6 +114,11 @@ export const ConnectedSobjectListMultiSelect: FunctionComponent<ConnectedSobject
     }
   }
 
+  function handleFilterFnParams(params: { editableOnly?: boolean }) {
+    filterFn = filterFnFactory(params);
+    loadObjects();
+  }
+
   return (
     <Fragment>
       <Grid>
@@ -125,6 +139,7 @@ export const ConnectedSobjectListMultiSelect: FunctionComponent<ConnectedSobject
         allowSelectAll={allowSelectAll}
         onSelected={onSelectedSObjects}
         errorReattempt={() => setErrorMessage(null)}
+        onFilterParamsUpdated={handleFilterFnParams}
       />
     </Fragment>
   );

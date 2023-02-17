@@ -20,6 +20,7 @@ export interface SobjectListMultiSelectProps {
   loading: boolean;
   errorMessage?: string; // TODO:
   onSelected: (selectedSObjects: string[]) => void;
+  onFilterParamsUpdated?: (filterParams: { editableOnly: boolean }) => void;
   errorReattempt: () => void;
 }
 
@@ -31,8 +32,10 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
   loading,
   errorMessage,
   onSelected,
+  onFilterParamsUpdated,
   errorReattempt,
 }) => {
+  let editableOnly = false;
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredSobjects, setFilteredSobjects] = useState<DescribeGlobalSObjectResult[]>(() => {
     if (sobjects?.length > 0 && searchTerm) {
@@ -83,6 +86,13 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
     onSelected(orderStringsBy(Array.from(selectedSObjectSet)));
   }
 
+  function handleEditableOnly(value: boolean) {
+    editableOnly = value;
+    onFilterParamsUpdated(
+      {editableOnly}
+    );
+  }
+
   return (
     <Fragment>
       {loading && !sobjects && (
@@ -129,6 +139,7 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
                     onChange={handleSelectAll}
                     disabled={filteredSobjects.length === 0}
                   />
+                  <Checkbox id="editable-only-sobject-multi" checked={editableOnly} label="Editable Only?" onChange={handleEditableOnly} />
                   <ItemSelectionSummary
                     label="object"
                     items={Array.from(selectedSObjectSet).map((item) => ({ label: item, value: item }))}

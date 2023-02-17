@@ -19,7 +19,7 @@ import { SplitWrapper as Split } from '@jetstream/splitjs';
 import { useRecoilState, useRecoilValue, useResetRecoilState } from 'recoil';
 import { selectedOrgState } from '../../app-state';
 import * as fromPermissionsState from './manage-permissions.state';
-import { filterPermissionsSobjects } from './utils/permission-manager-utils';
+import { filterPermissionsSobjects, filterPermissionsSobjectsFactory } from './utils/permission-manager-utils';
 
 const HEIGHT_BUFFER = 170;
 
@@ -160,7 +160,7 @@ export const ManagePermissionsSelection: FunctionComponent<ManagePermissionsSele
               selectedOrg={selectedOrg}
               sobjects={sobjects}
               selectedSObjects={selectedSObjects}
-              filterFn={filterPermissionsSobjects}
+              filterFnFactory={filterPermissionsSobjectsFactory}
               onSobjects={handleSobjectChange}
               onSelectedSObjects={setSelectedSObjects}
             />
