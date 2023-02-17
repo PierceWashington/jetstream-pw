@@ -36,6 +36,7 @@ const sessionMiddleware = session({
     // httpOnly: true,
     secure: environment.production,
     maxAge: 1000 * 60 * 60 * 24 * SESSION_EXP_DAYS,
+    // sameSite: false,
     // sameSite: 'strict',
   },
   secret: ENV.JESTREAM_SESSION_SECRET,
@@ -44,6 +45,7 @@ const sessionMiddleware = session({
   // This will extend the cookie expiration date if there is a request of any kind to a logged in user
   rolling: true,
   name: 'sessionid',
+  proxy: true,
 });
 
 passport.serializeUser(function (user, done) {
