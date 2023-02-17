@@ -28,10 +28,14 @@ import {
 
 const MAX_OBJ_IN_QUERY = 100;
 
-export function filterPermissionsSobjectsFactory({ editableOnly = true }: { editableOnly: boolean } = { editableOnly: true }) {
+export type FilterFunctionFactoryOptions = {
+  editableOnly?: boolean;
+};
+
+export function filterPermissionsSobjectsFactory(options: FilterFunctionFactoryOptions = { editableOnly: true }) {
   return (sobject: DescribeGlobalSObjectResult) => {
     return (
-      (!editableOnly || (sobject.createable && sobject.updateable)) &&
+      (!options.editableOnly || (sobject.createable && sobject.updateable)) &&
       !sobject.name.endsWith('__History') &&
       !sobject.name.endsWith('__Tag') &&
       !sobject.name.endsWith('__Share')
