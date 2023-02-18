@@ -136,7 +136,8 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
                     label="Select All"
                     onChange={handleSelectAll}
                     disabled={filteredSobjects.length === 0}
-                  />
+                  /> 
+                  {/* TODO: Get this in-line w/ other checkbox */}
                   <Checkbox id="editable-only-sobject-multi" checked={editableOnly} label="Editable Only?" onChange={handleEditableOnly} />
                   <ItemSelectionSummary
                     label="object"
