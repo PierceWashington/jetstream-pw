@@ -35,7 +35,7 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
   onFilterParamsUpdated,
   errorReattempt,
 }) => {
-  let editableOnly = false;
+  const [editableOnly, setEditableOnly] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [filteredSobjects, setFilteredSobjects] = useState<DescribeGlobalSObjectResult[]>(() => {
     if (sobjects?.length > 0 && searchTerm) {
@@ -87,10 +87,8 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
   }
 
   function handleEditableOnly(value: boolean) {
-    editableOnly = value;
-    onFilterParamsUpdated(
-      {editableOnly}
-    );
+    setEditableOnly(value);
+    onFilterParamsUpdated({ editableOnly: value });
   }
 
   return (
