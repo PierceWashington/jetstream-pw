@@ -1,12 +1,56 @@
-import type { SalesforceId } from 'jsforce';
-import { InsertUpdateUpsertDelete, SalesforceOrgEdition, SalesforceOrgLocaleKey } from './salesforce/types';
+import type { Query } from '@jetstreamapp/soql-parser-js';
+import { SalesforceOrgEdition } from './salesforce/misc.types';
+import { QueryResult } from './salesforce/query.types';
+import { InsertUpdateUpsertDeleteQuery } from './salesforce/record.types';
+
+export type CopyAsDataType = 'excel' | 'csv' | 'json';
+
+export interface RequestResult<T> {
+  data: T;
+}
+
+export interface QueryResults<T = unknown> {
+  queryResults: QueryResult<T>;
+  columns?: QueryResultsColumns;
+  parsedQuery?: Query;
+}
+
+export interface QueryResultsColumns {
+  entityName: string;
+  groupBy: boolean;
+  idSelected: boolean;
+  keyPrefix: string;
+  columns?: QueryResultsColumn[];
+}
+
+export interface QueryResultsColumn {
+  columnFullPath: string;
+  aggregate: boolean;
+  apexType: string | null;
+  booleanType: boolean;
+  columnName: string;
+  custom: boolean;
+  displayName: string;
+  foreignKeyName: string | null;
+  insertable: boolean;
+  numberType: boolean;
+  textType: boolean;
+  updatable: boolean;
+  childColumnPaths?: QueryResultsColumn[];
+}
+
+export type Maybe<T> = T | null | undefined;
+export type Nullable<T> = T | null;
+
+export const isNotNullish = <T>(input: T | null | undefined): input is T => input != null;
+export const isNotEmpty = <T>(input: T[]) => input.length !== 0;
 
 export interface ApiResponse<T = unknown> {
   data: T;
   cache?: CacheItem;
 }
 
-export type OrgCacheItem<T> = MapOf<CacheItemWithData<T>>;
+export type OrgCacheItem<T> = Record<string, CacheItemWithData<T>>;
 
 export interface CacheItem {
   key: string;
@@ -24,16 +68,6 @@ export type Development = 'development';
 export type Environment = Production | Test | Development;
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-export type SobjectOperation = 'retrieve' | 'create' | 'update' | 'upsert' | 'delete';
-
-export interface MapOf<T> {
-  [key: string]: T;
-}
-
-export interface RecordAttributes {
-  type: string;
-  url: string;
-}
 
 export interface ApplicationCookie {
   serverUrl: string;
@@ -54,7 +88,7 @@ export interface AuthenticationToken {
 }
 
 export interface UserProfilePreferences {
-  deniedNotifications: boolean;
+  deniedNotifications?: boolean;
 }
 
 export type UserProfileUsernameStatus = 'ACTIVE' | 'PENDING' | 'REJECTED';
@@ -95,6 +129,7 @@ export interface UserProfileAuth0IdentityProfileData {
   username?: string;
   nickname?: string;
 }
+
 export interface UserProfileAuth0 {
   user_id: string;
   created_at: string;
@@ -121,6 +156,23 @@ export type UserProfileAuth0Ui = Pick<
   'user_id' | 'email' | 'email_verified' | 'identities' | 'name' | 'nickname' | 'picture' | 'app_metadata' | 'username'
 >;
 
+export interface UserProfileUiWithIdentities {
+  id: string;
+  userId: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  picture?: string;
+  username: string;
+  nickname: string;
+  preferences: {
+    skipFrontdoorLogin: boolean;
+  };
+  identities: UserProfileAuth0Identity[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface UserProfileUi {
   email: string;
   email_verified: boolean;
@@ -128,23 +180,78 @@ export interface UserProfileUi {
   'http://getjetstream.app/app_metadata': { featureFlags: FeatureFlag };
   name: string;
   nickname: string;
-  picture: string;
+  picture?: string | null;
   sub: string; // userid
   updated_at: string;
+  id: string;
+  userId: string;
+  createdAt: string;
+  updatedAt: string;
+  preferences: {
+    skipFrontdoorLogin: boolean;
+  };
 }
 
 // SERVER ONLY TYPE - BROWSER WILL GET UserProfileUi
 export interface UserProfileServer {
-  _json: UserProfileUi;
-  _raw: string;
+  _json: Omit<UserProfileUi, 'id' | 'userId' | 'createdAt' | 'updatedAt' | 'preferences'>;
+  _raw: string | null;
   id: string;
   displayName: string;
   emails: { value: string }[];
   name: any;
   nickname: string;
-  picture: string;
+  picture?: string | null;
   provider: string;
   user_id: string;
+}
+
+export interface SalesforceUserInfo {
+  sub: string;
+  user_id: string;
+  organization_id: string;
+  preferred_username: string;
+  nickname: string;
+  name: string;
+  email: string;
+  email_verified: boolean;
+  given_name: string;
+  family_name: string;
+  zoneinfo: string;
+  photos: {
+    picture: string;
+    thumbnail: string;
+  };
+  profile: string;
+  picture: string;
+  address: any;
+  is_salesforce_integration_user: boolean;
+  urls: {
+    enterprise: string;
+    metadata: string;
+    partner: string;
+    rest: string;
+    sobjects: string;
+    search: string;
+    query: string;
+    recent: string;
+    tooling_soap: string;
+    tooling_rest: string;
+    profile: string;
+    feeds: string;
+    groups: string;
+    users: string;
+    feed_items: string;
+    feed_elements: string;
+    custom_domain: string;
+  };
+  active: boolean;
+  user_type: string;
+  language: string;
+  locale: string;
+  utcOffset: number;
+  updated_at: string;
+  is_app_installed: boolean;
 }
 
 export interface CloudinarySignature {
@@ -178,9 +285,6 @@ export interface CloudinaryUploadResponse {
   width: number;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type Record<T = any> = { attributes?: RecordAttributes; Id?: SalesforceId } & T;
-
 export interface SalesforceOrgUi {
   id?: number;
   uniqueId: string;
@@ -194,20 +298,20 @@ export interface SalesforceOrgUi {
   organizationId: string;
   username: string;
   displayName: string;
-  thumbnail?: string;
-  apiVersion?: string;
-  orgName?: string;
-  orgCountry?: string;
-  orgOrganizationType?: SalesforceOrgEdition;
-  orgInstanceName?: string;
-  orgIsSandbox?: boolean;
-  orgLanguageLocaleKey?: SalesforceOrgLocaleKey;
-  orgNamespacePrefix?: string;
-  orgTrialExpirationDate?: string;
-  color?: string;
-  connectionError?: string;
-  createdAt?: string;
-  updatedAt?: string;
+  thumbnail?: Maybe<string>;
+  apiVersion?: Maybe<string>;
+  orgName?: Maybe<string>;
+  orgCountry?: Maybe<string>;
+  orgOrganizationType?: Maybe<SalesforceOrgEdition>;
+  orgInstanceName?: Maybe<string>;
+  orgIsSandbox?: Maybe<boolean>;
+  orgLanguageLocaleKey?: Maybe<string>;
+  orgNamespacePrefix?: Maybe<string>;
+  orgTrialExpirationDate?: Maybe<string>;
+  color?: Maybe<string>;
+  connectionError?: Maybe<string>;
+  createdAt?: Maybe<string>;
+  updatedAt?: Maybe<string>;
 }
 
 export type SalesforceOrgUiType = 'Sandbox' | 'Developer' | 'Production';
@@ -215,7 +319,7 @@ export type SalesforceOrgUiType = 'Sandbox' | 'Developer' | 'Production';
 export interface GenericRequestPayload {
   url: string;
   method: HttpMethod;
-  isTooling: boolean;
+  isTooling?: boolean;
   body?: any;
   headers?: any;
   options?: {
@@ -228,20 +332,20 @@ export type ManualRequestPayload = Omit<GenericRequestPayload, 'isTooling' | 'op
 
 export type ManualRequestResponse = {
   error: boolean;
-  errorMessage?: string;
+  errorMessage?: Maybe<string>;
   status: number | null;
-  statusText: string | null;
+  statusText?: string | null;
   headers: string | null;
-  body?: string;
+  body?: Maybe<string>;
 };
 
 export interface BulkApiCreateJobRequestPayload {
-  type: InsertUpdateUpsertDelete;
+  type: InsertUpdateUpsertDeleteQuery;
   sObject: string;
-  serialMode?: boolean;
-  externalId?: string;
-  assignmentRuleId?: string;
-  hasZipAttachment?: boolean;
+  serialMode?: Maybe<boolean>;
+  externalId?: Maybe<string>;
+  assignmentRuleId?: Maybe<string>;
+  hasZipAttachment?: Maybe<boolean>;
 }
 
 export interface SocketAck<T = any> {
@@ -264,4 +368,28 @@ export interface PlatformEventMessagePayload<T = any> {
 export interface PlatformEventMessageData {
   EventUuid: string;
   replayId: number;
+}
+
+export interface AnalyticStat {
+  id: string;
+  name: string;
+  value: string;
+  valueRaw: number;
+  lastUpdated: string;
+}
+
+export type NullNumberBehavior = 'ZERO' | 'BLANK';
+
+export interface FormulaFieldsByType {
+  objectFields: string[];
+  customLabels: string[];
+  apiFields: string[];
+  customMetadata: string[];
+  organization: string[];
+  customPermissions: string[];
+  profile: string[];
+  customSettings: string[];
+  system: string[];
+  user: string[];
+  userRole: string[];
 }

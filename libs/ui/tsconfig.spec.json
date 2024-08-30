@@ -3,7 +3,8 @@
   "compilerOptions": {
     "outDir": "../../dist/out-tsc",
     "module": "commonjs",
-    "types": ["jest", "node"]
+    "strictNullChecks": false,
+    "types": ["jest", "node", "google.accounts", "google.picker", "gapi.auth2", "gapi.client.drive"]
   },
   "include": [
     "**/*.spec.ts",
@@ -17,5 +18,9 @@
     "**/*.d.ts",
     "jest.config.ts"
   ],
-  "files": ["../../node_modules/@nrwl/react/typings/cssmodule.d.ts", "../../node_modules/@nrwl/react/typings/image.d.ts"]
+  "files": [
+    "../../node_modules/@nx/react/typings/cssmodule.d.ts",
+    "../../node_modules/@nx/react/typings/image.d.ts",
+    "../../custom-typings/index.d.ts"
+  ]
 }

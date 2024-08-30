@@ -1,3 +1,4 @@
+import { css } from '@emotion/react';
 import { IconObj } from '@jetstream/icon-factory';
 import classNames from 'classnames';
 import { FunctionComponent } from 'react';
@@ -25,14 +26,19 @@ export const PageHeaderTitle: FunctionComponent<PageHeaderTitleProps> = ({
   children,
 }) => {
   return (
-    <div className="slds-page-header__col-title">
+    <div
+      className="slds-page-header__col-title"
+      css={css`
+        min-width: fit-content;
+      `}
+    >
       <div className="slds-media">
         <div className="slds-media__figure">
           <Icon
             type={icon.type}
             icon={icon.icon}
             description={icon.description}
-            className={`slds-icon slds-page-header__icon slds-icon-${icon.type}-${icon.icon?.replace('_', '-')}`}
+            className={`slds-icon slds-page-header__icon slds-icon-${icon.type}-${icon.icon?.replaceAll('_', '-')}`}
           />
         </div>
         <div className="slds-media__body">

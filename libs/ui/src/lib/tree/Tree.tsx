@@ -1,10 +1,9 @@
 /* eslint-disable jsx-a11y/anchor-is-valid */
 
 import { useNonInitialEffect } from '@jetstream/shared/ui-utils';
-import { MapOf } from '@jetstream/types';
 import classNames from 'classnames';
-import TreeItem from 'libs/ui/src/lib/tree/TreeItem';
 import { forwardRef, useEffect, useImperativeHandle, useState } from 'react';
+import TreeItem from './TreeItem';
 
 export interface TreeItems<T = any> {
   id: string;
@@ -35,12 +34,12 @@ export interface TreeHandleRefFns {
 
 function getAllIds(
   items: TreeItems[],
-  output?: { ids: Set<string>; idMap: MapOf<TreeItems> }
-): { ids: Set<string>; idMap: MapOf<TreeItems> } {
+  output?: { ids: Set<string>; idMap: Record<string, TreeItems> }
+): { ids: Set<string>; idMap: Record<string, TreeItems> } {
   output = output || { ids: new Set(), idMap: {} };
   items.forEach((item) => {
-    output.ids.add(item.id);
-    output.idMap[item.id] = item;
+    output && output.ids.add(item.id);
+    output && (output.idMap[item.id] = item);
     if (Array.isArray(item.treeItems)) {
       return getAllIds(item.treeItems, output);
     }
@@ -63,7 +62,7 @@ export const Tree = forwardRef<any, TreeProps>(
     },
     ref
   ) => {
-    const [selectedItem, setSelectedItem] = useState<string>();
+    const [selectedItem, setSelectedItem] = useState<string | null>(null);
     const [expandedItems, setExpandedItems] = useState(new Set<string>());
 
     useNonInitialEffect(() => {

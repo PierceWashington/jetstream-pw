@@ -1,30 +1,31 @@
-import { QueryResults, QueryResultsColumn } from '@jetstream/api-interfaces';
-import { DATE_FORMATS } from '@jetstream/shared/constants';
-import { ensureBoolean, pluralizeFromNumber } from '@jetstream/shared/utils';
-import { MapOf } from '@jetstream/types';
-import isAfter from 'date-fns/isAfter';
-import isBefore from 'date-fns/isBefore';
-import isSameDay from 'date-fns/isSameDay';
-import isDateValid from 'date-fns/isValid';
-import parseDate from 'date-fns/parse';
-import parseISO from 'date-fns/parseISO';
-import startOfDay from 'date-fns/startOfDay';
-import startOfMinute from 'date-fns/startOfMinute';
-import { Field } from 'jsforce';
+import { logger } from '@jetstream/shared/client-logger';
+import { DATE_FORMATS, RECORD_PREFIX_MAP } from '@jetstream/shared/constants';
+import { copyRecordsToClipboard } from '@jetstream/shared/ui-utils';
+import { ensureBoolean, getIdFromRecordUrl, pluralizeFromNumber } from '@jetstream/shared/utils';
+import { Field, Maybe, QueryResults, QueryResultsColumn } from '@jetstream/types';
+import { FieldSubquery, getField, getFlattenedFields, isFieldSubquery } from '@jetstreamapp/soql-parser-js';
+import { isAfter } from 'date-fns/isAfter';
+import { isBefore } from 'date-fns/isBefore';
+import { isSameDay } from 'date-fns/isSameDay';
+import { isValid as isDateValid } from 'date-fns/isValid';
+import { parse as parseDate } from 'date-fns/parse';
+import { parseISO } from 'date-fns/parseISO';
+import { startOfDay } from 'date-fns/startOfDay';
+import { startOfMinute } from 'date-fns/startOfMinute';
 import isNil from 'lodash/isNil';
 import isNumber from 'lodash/isNumber';
 import isObject from 'lodash/isObject';
 import isString from 'lodash/isString';
 import uniqueId from 'lodash/uniqueId';
 import { SelectColumn, SELECT_COLUMN_KEY as _SELECT_COLUMN_KEY } from 'react-data-grid';
-import { FieldSubquery, getField, getFlattenedFields, isFieldSubquery } from 'soql-parser-js';
+import { ContextMenuItem } from '../popover/ContextMenu';
 import {
-  dataTableAddressValueFormatter,
-  dataTableDateFormatter,
-  dataTableLocationFormatter,
-  dataTableTimeFormatter,
-} from './data-table-formatters';
-import { ColumnType, ColumnWithFilter, DataTableFilter, FilterType, RowWithKey, SalesforceQueryColumnDefinition } from './data-table-types';
+  DataTableEditorBoolean,
+  DataTableEditorDate,
+  DataTableEditorText,
+  dataTableEditorDropdownWrapper,
+  dataTableEditorRecordLookup,
+} from './DataTableEditors';
 import {
   ActionRenderer,
   BooleanRenderer,
@@ -35,13 +36,31 @@ import {
   IdLinkRenderer,
   SelectFormatter,
   SelectHeaderRenderer,
+  TextOrIdLinkRenderer,
 } from './DataTableRenderers';
 import { SubqueryRenderer } from './DataTableSubqueryRenderer';
+import {
+  dataTableAddressValueFormatter,
+  dataTableDateFormatter,
+  dataTableLocationFormatter,
+  dataTableTimeFormatter,
+} from './data-table-formatters';
+import {
+  ColumnType,
+  ColumnWithFilter,
+  ContextAction,
+  ContextMenuActionData,
+  DataTableFilter,
+  FilterType,
+  RowWithKey,
+  SalesforceQueryColumnDefinition,
+} from './data-table-types';
 
 const SFDC_EMPTY_ID = '000000000000000AAA';
 
 export const EMPTY_FIELD = '-BLANK-';
 export const ACTION_COLUMN_KEY = '_actions';
+export const RECORD_ERROR_COLUMN_KEY = '_saveError';
 export const SELECT_COLUMN_KEY = _SELECT_COLUMN_KEY;
 export const NON_DATA_COLUMN_KEYS = new Set([SELECT_COLUMN_KEY, ACTION_COLUMN_KEY]);
 
@@ -56,14 +75,22 @@ export function getRowId(data: any): string {
     return uniqueId('row-id');
   }
   let nodeId = data?.attributes?.url || data.Id || data.id || data.key;
-  if (!nodeId || nodeId.endsWith(SFDC_EMPTY_ID) || data.Id === SFDC_EMPTY_ID) {
+  if (!nodeId || (isString(nodeId) && nodeId.endsWith(SFDC_EMPTY_ID)) || data.Id === SFDC_EMPTY_ID) {
     nodeId = uniqueId('row-id');
   }
   return nodeId;
 }
 
+/**
+ * Get columns for a generic table. Use this when the data is provided by the user and types of columns are generally unknown
+ *
+ * @param headers
+ * @param defaultFilters If no type is provided, the default filters that will be applied
+ * @returns
+ */
 export function getColumnsForGenericTable(
-  headers: { label: string; key: string; columnProps?: Partial<ColumnWithFilter<RowWithKey>>; type?: ColumnType }[]
+  headers: { label: string; key: string; columnProps?: Partial<ColumnWithFilter<RowWithKey>>; type?: ColumnType }[],
+  defaultFilters: FilterType[] = ['TEXT', 'SET']
 ): ColumnWithFilter<RowWithKey>[] {
   return headers.map(({ label, key, columnProps, type }) => {
     const column: Mutable<ColumnWithFilter<RowWithKey>> = {
@@ -71,9 +98,9 @@ export function getColumnsForGenericTable(
       key,
       resizable: true,
       sortable: true,
-      filters: ['TEXT', 'SET'],
-      formatter: GenericRenderer,
-      headerRenderer: (props) => (
+      filters: defaultFilters,
+      renderCell: TextOrIdLinkRenderer,
+      renderHeaderCell: (props) => (
         <FilterRenderer {...props}>
           {({ filters, filterSetValues, portalRefForFilters, updateFilter }) => (
             <HeaderFilter
@@ -100,7 +127,12 @@ export function getColumnsForGenericTable(
  * @param isTooling
  * @returns
  */
-export function getColumnDefinitions(results: QueryResults<any>, isTooling: boolean): SalesforceQueryColumnDefinition<any> {
+export function getColumnDefinitions(
+  results: QueryResults<any>,
+  isTooling: boolean,
+  fieldMetadata?: Maybe<Record<string, Field>>,
+  fieldMetadataSubquery?: Maybe<Record<string, Record<string, Field>>>
+): SalesforceQueryColumnDefinition<any> {
   // if we have id, include record actions
   const includeRecordActions =
     !isTooling && results.queryResults.records.length
@@ -112,7 +144,7 @@ export function getColumnDefinitions(results: QueryResults<any>, isTooling: bool
   };
 
   // map each field to the returned metadata from SFDC
-  let queryColumnsByPath: MapOf<QueryResultsColumn> = {};
+  let queryColumnsByPath: Record<string, QueryResultsColumn> = {};
   if (results.columns?.columns) {
     queryColumnsByPath = results.columns.columns.reduce((out, curr, i) => {
       out[curr.columnFullPath.toLowerCase()] = curr;
@@ -125,7 +157,10 @@ export function getColumnDefinitions(results: QueryResults<any>, isTooling: bool
 
       if (Array.isArray(curr.childColumnPaths)) {
         curr.childColumnPaths.forEach((subqueryField) => {
-          out[subqueryField.columnFullPath.toLowerCase()] = subqueryField;
+          out[subqueryField.columnFullPath.toLowerCase()] = {
+            ...subqueryField,
+            columnFullPath: subqueryField.columnFullPath.split('.').slice(1).join('.'), // remove child relationship name
+          } as QueryResultsColumn;
         });
       }
       return out;
@@ -133,16 +168,16 @@ export function getColumnDefinitions(results: QueryResults<any>, isTooling: bool
   }
   // If there is a FIELDS('') clause in the query, then we know the data will not be shown
   // in this case, fall back to Salesforce column data instead of the query results
-  const hasFieldsQuery = results.parsedQuery.fields.some(
+  const hasFieldsQuery = results.parsedQuery?.fields?.some(
     (field) => field.type === 'FieldFunctionExpression' && field.functionName === 'FIELDS'
   );
-  if (hasFieldsQuery) {
-    results.parsedQuery.fields = results.columns?.columns.map((column) => getField(column.columnFullPath));
+  if (results.parsedQuery && hasFieldsQuery) {
+    results.parsedQuery.fields = results.columns?.columns?.map((column) => getField(column.columnFullPath));
   }
 
   // Base fields
-  const parentColumns: ColumnWithFilter<RowWithKey>[] = getFlattenedFields(results.parsedQuery).map((field, i) =>
-    getQueryResultColumn(field, queryColumnsByPath, isFieldSubquery(results.parsedQuery?.[i]))
+  const parentColumns: ColumnWithFilter<RowWithKey>[] = getFlattenedFields(results.parsedQuery || {}).map((field, i) =>
+    getQueryResultColumn({ field, queryColumnsByPath, isSubquery: isFieldSubquery(results.parsedQuery?.[i]), fieldMetadata })
   );
 
   // set checkbox as first column
@@ -151,16 +186,18 @@ export function getColumnDefinitions(results: QueryResults<any>, isTooling: bool
       ...SelectColumn,
       key: SELECT_COLUMN_KEY,
       resizable: false,
-      formatter: SelectFormatter,
-      headerRenderer: SelectHeaderRenderer,
+      renderCell: SelectFormatter,
+      renderHeaderCell: SelectHeaderRenderer,
     });
     if (includeRecordActions) {
       parentColumns.unshift({
         key: ACTION_COLUMN_KEY,
         name: '',
-        resizable: false,
-        width: 100,
-        formatter: ActionRenderer,
+        resizable: true,
+        width: 116,
+        minWidth: 100,
+        maxWidth: 150,
+        renderCell: ActionRenderer,
         frozen: true,
         sortable: false,
       });
@@ -171,10 +208,17 @@ export function getColumnDefinitions(results: QueryResults<any>, isTooling: bool
 
   // subquery fields - only used if user clicks "view data" on a field so that the table can be built properly
   results.parsedQuery?.fields
-    .filter((field) => isFieldSubquery(field))
-    .forEach((field: FieldSubquery) => {
-      output.subqueryColumns[field.subquery.relationshipName] = getFlattenedFields(field.subquery).map((field) =>
-        getQueryResultColumn(field, queryColumnsByPath, false)
+    ?.filter((field) => isFieldSubquery(field))
+    .forEach((parentField: FieldSubquery) => {
+      output.subqueryColumns[parentField.subquery.relationshipName] = getFlattenedFields(parentField.subquery || {}).map((field) =>
+        getQueryResultColumn({
+          field,
+          subqueryRelationshipName: parentField.subquery.relationshipName,
+          queryColumnsByPath,
+          isSubquery: false,
+          allowEdit: false,
+          fieldMetadata: fieldMetadataSubquery?.[field],
+        })
       );
     });
 
@@ -185,20 +229,40 @@ type Mutable<Type> = {
   -readonly [Key in keyof Type]: Type[Key];
 };
 
-function getQueryResultColumn(
-  field: string,
-  queryColumnsByPath: MapOf<QueryResultsColumn>,
-  isSubquery: boolean
-): ColumnWithFilter<RowWithKey> {
+function getQueryResultColumn({
+  field,
+  subqueryRelationshipName,
+  queryColumnsByPath,
+  isSubquery,
+  fieldMetadata,
+  allowEdit = true,
+}: {
+  field: string;
+  subqueryRelationshipName?: string;
+  queryColumnsByPath: Record<string, QueryResultsColumn>;
+  isSubquery: boolean;
+  fieldMetadata?: Maybe<Record<string, Field>>;
+  allowEdit?: boolean;
+}): ColumnWithFilter<RowWithKey> {
   const column: Mutable<ColumnWithFilter<RowWithKey>> = {
     name: field,
     key: field,
-    cellClass: 'slds-truncate',
+    cellClass: (row: any) => {
+      const classes = ['slds-truncate'];
+      if (row._touchedColumns instanceof Set && (row._touchedColumns as Set<string>).has(field) && row[field] !== row._record?.[field]) {
+        classes.push('edited');
+        if (row._saveError) {
+          classes.push('active-item-error');
+        }
+      }
+      return classes.join(' ');
+    },
     resizable: true,
     sortable: true,
+    draggable: true,
     width: 200,
     filters: ['TEXT', 'SET'],
-    headerRenderer: (props) => (
+    renderHeaderCell: (props) => (
       <FilterRenderer {...props}>
         {({ filters, filterSetValues, portalRefForFilters, updateFilter }) => (
           <HeaderFilter
@@ -213,12 +277,19 @@ function getQueryResultColumn(
     ),
   };
 
-  const fieldLowercase = field.toLowerCase();
+  let fieldLowercase = field.toLowerCase();
+  if (subqueryRelationshipName) {
+    fieldLowercase = `${subqueryRelationshipName.toLowerCase()}.${fieldLowercase}`;
+  }
   if (queryColumnsByPath[fieldLowercase]) {
     const col = queryColumnsByPath[fieldLowercase];
     column.name = col.columnFullPath;
     column.key = col.columnFullPath;
     updateColumnFromType(column, getColumnTypeFromQueryResultsColumn(col));
+    // exclude related records from edit mode
+    if (allowEdit && !col.columnFullPath?.includes('.')) {
+      updateColumnWithEditMode(column, col, fieldMetadata);
+    }
   } else {
     if (field.endsWith('Id')) {
       updateColumnFromType(column, 'salesforceId');
@@ -261,7 +332,7 @@ function getColumnTypeFromQueryResultsColumn(col: QueryResultsColumn): ColumnTyp
  */
 export function setColumnFromType<T>(key: string, fieldType: ColumnType, defaultProps?: Partial<Mutable<ColumnWithFilter<T>>>) {
   const column: Partial<Mutable<ColumnWithFilter<T>>> = { ...defaultProps };
-  column.headerRenderer = (props) => (
+  column.renderHeaderCell = (props) => (
     <FilterRenderer {...props}>
       {({ filters, filterSetValues, portalRefForFilters, updateFilter }) => (
         <HeaderFilter
@@ -279,6 +350,24 @@ export function setColumnFromType<T>(key: string, fieldType: ColumnType, default
 }
 
 /**
+ * Get type of data for column
+ *
+ * @param value
+ * @param allowObject Object will show a link to "view data" in a modal. Set this to false if the data table is already in a modal to avoid stacked modals
+ * @returns
+ */
+export function getRowTypeFromValue(value: unknown, allowObject = true): ColumnType {
+  if (allowObject && (isObject(value) || Array.isArray(value))) {
+    return 'object';
+  } else if (typeof value === 'boolean') {
+    return 'boolean';
+  } else if (typeof value === 'number') {
+    return 'number';
+  }
+  return 'textOrSalesforceId';
+}
+
+/**
  * Based on field type, update formatters and filters
  * @param column
  * @param fieldType
@@ -287,13 +376,14 @@ export function updateColumnFromType(column: Mutable<ColumnWithFilter<any>>, fie
   column.filters = ['TEXT', 'SET'];
   switch (fieldType) {
     case 'text':
+      column.renderCell = GenericRenderer;
       break;
     case 'number':
       // TODO:
       break;
     case 'subquery':
       column.filters = ['SET'];
-      column.formatter = SubqueryRenderer;
+      column.renderCell = SubqueryRenderer;
       column.getValue = ({ column, row }) => {
         const results = row[column.key];
         if (!results || !results.totalSize) {
@@ -304,33 +394,37 @@ export function updateColumnFromType(column: Mutable<ColumnWithFilter<any>>, fie
       break;
     case 'object':
       column.filters = [];
-      column.formatter = ComplexDataRenderer;
+      column.renderCell = ComplexDataRenderer;
       break;
     case 'location':
-      column.formatter = ({ column, row }) => dataTableLocationFormatter(row[column.key]);
+      column.renderCell = ({ column, row }) => dataTableLocationFormatter(row[column.key]);
       column.getValue = ({ column, row }) => dataTableLocationFormatter(row[column.key]);
       break;
     case 'date':
       column.filters = ['DATE', 'SET'];
-      column.formatter = ({ column, row }) => dataTableDateFormatter(row[column.key]);
+      column.renderCell = ({ column, row }) => dataTableDateFormatter(row[column.key]);
       column.getValue = ({ column, row }) => dataTableDateFormatter(row[column.key]);
       break;
     case 'time':
       column.filters = ['TIME', 'SET'];
-      column.formatter = ({ column, row }) => dataTableTimeFormatter(row[column.key]);
+      column.renderCell = ({ column, row }) => dataTableTimeFormatter(row[column.key]);
       column.getValue = ({ column, row }) => dataTableTimeFormatter(row[column.key]);
       break;
     case 'boolean':
       column.filters = ['BOOLEAN_SET'];
-      column.formatter = BooleanRenderer;
+      column.renderCell = BooleanRenderer;
       column.width = 100;
       break;
     case 'address':
-      column.formatter = ({ column, row }) => dataTableAddressValueFormatter(row[column.key]);
+      column.renderCell = ({ column, row }) => dataTableAddressValueFormatter(row[column.key]);
       column.getValue = ({ column, row }) => dataTableAddressValueFormatter(row[column.key]);
       break;
     case 'salesforceId':
-      column.formatter = IdLinkRenderer;
+      column.renderCell = IdLinkRenderer;
+      column.width = 175;
+      break;
+    case 'textOrSalesforceId':
+      column.renderCell = TextOrIdLinkRenderer;
       column.width = 175;
       break;
     default:
@@ -338,7 +432,84 @@ export function updateColumnFromType(column: Mutable<ColumnWithFilter<any>>, fie
   }
 }
 
-export function addFieldLabelToColumn(columnDefinitions: ColumnWithFilter<RowWithKey>[], fieldMetadata: MapOf<Field>) {
+/**
+ * Allow inline editing of a cell based on field type or column results
+ */
+export function updateColumnWithEditMode(
+  column: Mutable<ColumnWithFilter<any>>,
+  { updatable, booleanType, apexType, columnName }: QueryResultsColumn,
+  fieldMetadata: Maybe<Record<string, Field>> = {}
+) {
+  column.editable = false;
+  fieldMetadata = fieldMetadata || {};
+  const field = fieldMetadata[column.key.toLowerCase()];
+  const type = field?.type;
+  if (
+    (field && !field?.updateable) ||
+    !updatable ||
+    type === 'complexvalue' ||
+    type === 'address' ||
+    type === 'anyType' ||
+    apexType === 'complexvaluetype' ||
+    columnName === 'Metadata'
+  ) {
+    return;
+  } else if (type === 'boolean' || booleanType) {
+    column.editable = true;
+    column.editorOptions = {
+      commitOnOutsideClick: false,
+      displayCellContent: true,
+    };
+    column.renderEditCell = DataTableEditorBoolean;
+  } else if (type === 'date' || apexType === 'Date' || type === 'datetime' || apexType === 'Datetime') {
+    column.editable = true;
+    column.editorOptions = {
+      commitOnOutsideClick: false,
+      displayCellContent: true,
+    };
+    column.renderEditCell = DataTableEditorDate;
+  } else if (field?.picklistValues && (type === 'picklist' || type === 'multipicklist')) {
+    column.editable = true;
+    column.editorOptions = {
+      commitOnOutsideClick: false,
+      displayCellContent: true,
+    };
+    column.renderEditCell = dataTableEditorDropdownWrapper({
+      isMultiSelect: type === 'multipicklist',
+      values: field.picklistValues
+        .filter(({ active }) => active)
+        .map(({ value, label }) => ({
+          id: value,
+          label: value,
+          secondaryLabel: label !== value ? label : undefined,
+          secondaryLabelOnNewLine: label !== value,
+          value: value,
+        })),
+    });
+    // We could differentiate number types
+    // } else if (type === 'currency' || type === 'double' || type === 'int' || type === 'percent' || numberType) {
+    // } else if (type === 'id' || apexType === 'Id') {
+    // } else if (type === 'datetime' || apexType === 'Datetime') {
+    // } else if (type === 'time' || apexType === 'Time') {
+  } else if (type === 'reference' && field.referenceTo?.length === 1) {
+    column.editable = true;
+    column.editorOptions = {
+      commitOnOutsideClick: false,
+      displayCellContent: true,
+    };
+    column.renderEditCell = dataTableEditorRecordLookup({ sobject: field.referenceTo[0] });
+  } else {
+    // textType
+    column.editable = true;
+    column.editorOptions = {
+      commitOnOutsideClick: false,
+      displayCellContent: true,
+    };
+    column.renderEditCell = DataTableEditorText;
+  }
+}
+
+export function addFieldLabelToColumn(columnDefinitions: ColumnWithFilter<RowWithKey>[], fieldMetadata: Record<string, Field>) {
   if (fieldMetadata) {
     // set field api name and label
     return columnDefinitions.map((col) => {
@@ -416,7 +587,7 @@ export function filterRecord(filter: DataTableFilter, value: any): boolean {
       }
     }
     case 'DATE': {
-      if (!value) {
+      if (!value || !filter.value) {
         return false;
       }
       const dateFilter = startOfDay(parseISO(filter.value));
@@ -477,9 +648,9 @@ export function filterRecord(filter: DataTableFilter, value: any): boolean {
 }
 
 export function getSubqueryModalTagline(parentRecord: any) {
-  let currModalTagline: string;
-  let recordName: string;
-  let recordId: string;
+  let currModalTagline: string | undefined = undefined;
+  let recordName: string | undefined = undefined;
+  let recordId: string | undefined = undefined;
   try {
     if (parentRecord.Name) {
       recordName = parentRecord.Name;
@@ -516,16 +687,32 @@ export function getSubqueryModalTagline(parentRecord: any) {
  * @param record
  * @returns
  */
-export function getSfdcRetUrl(id: string, record: any): { skipFrontDoorAuth: boolean; url: string } {
-  const type = record?.attributes?.type;
-  switch (type) {
-    case 'Group':
+export function getSfdcRetUrl(record: any, id?: string, skipFrontdoorLoginOverride?: boolean): { skipFrontDoorAuth: boolean; url: string } {
+  try {
+    id = id || getIdFromRecordUrl(record?.attributes?.url || record?._record?.attributes?.url);
+    const baseRecordType = record?.attributes?.type || record?._record?.attributes?.type;
+    const relatedRecordType = RECORD_PREFIX_MAP[(id || '').substring(0, 3)] || null;
+
+    if (baseRecordType === 'Group') {
       return {
-        skipFrontDoorAuth: true,
+        skipFrontDoorAuth: skipFrontdoorLoginOverride ?? true,
         url: `/lightning/setup/PublicGroups/page?address=${encodeURIComponent(`/setup/own/groupdetail.jsp?id=${id}`)}`,
       };
-    default:
-      return { skipFrontDoorAuth: false, url: `/${id}` };
+    }
+
+    switch (relatedRecordType) {
+      case 'RecordType': {
+        return {
+          skipFrontDoorAuth: skipFrontdoorLoginOverride ?? false,
+          url: `/lightning/setup/ObjectManager/${relatedRecordType}/RecordTypes/${id}/view`,
+        };
+      }
+      default:
+        return { skipFrontDoorAuth: skipFrontdoorLoginOverride ?? false, url: `/${id}` };
+    }
+  } catch (ex) {
+    logger.error('Error formatting Salesforce URL', ex);
+    return { skipFrontDoorAuth: skipFrontdoorLoginOverride ?? false, url: `/${id}` };
   }
 }
 
@@ -557,4 +744,93 @@ export function getSearchTextByRow<T>(rows: T[], columns: ColumnWithFilter<T>[],
     });
   }
   return output;
+}
+
+export const TABLE_CONTEXT_MENU_ITEMS: ContextMenuItem<ContextAction>[] = [
+  { label: 'Copy cell to clipboard', value: 'COPY_CELL', divider: true },
+
+  { label: 'Copy row to clipboard (Excel)', value: 'COPY_ROW_EXCEL' },
+  { label: 'Copy row to clipboard (JSON)', value: 'COPY_ROW_JSON', divider: true },
+
+  { label: 'Copy column to clipboard (Excel)', value: 'COPY_COL' },
+  { label: 'Copy column to clipboard (JSON)', value: 'COPY_COL_JSON' },
+  { label: 'Copy column to clipboard without header', value: 'COPY_COL_NO_HEADER', divider: true },
+
+  { label: 'Copy table to clipboard (Excel)', value: 'COPY_TABLE' },
+  { label: 'Copy table to clipboard (JSON)', value: 'COPY_TABLE_JSON' },
+];
+
+/**
+ * FOR USE IN SALESFORCE RECORDS ONLY (assumes _record property)
+ * Generic function to copy table data to clipboard
+ * Assumes ContextMenuItem[]
+ * Other use-cases will need to implement their own
+ */
+export function copySalesforceRecordTableDataToClipboard(
+  action: ContextAction,
+  fields: string[],
+  { row, rows, column, columns }: ContextMenuActionData<RowWithKey>
+) {
+  let includeHeader = true;
+  let recordsToCopy: unknown[] = [];
+  const records = rows.map((row) => row._record);
+  const fieldsSet = new Set(fields);
+  let fieldsToCopy = columns.map((column) => column.key).filter((field) => fieldsSet.has(field)); // prefer this over fields because it accounts for reordering
+  let format: 'plain' | 'excel' | 'json' = 'plain';
+
+  switch (action) {
+    case 'COPY_CELL':
+      includeHeader = false;
+      fieldsToCopy = [column.key];
+      recordsToCopy = [row._record];
+      break;
+
+    case 'COPY_ROW_EXCEL':
+      format = 'excel';
+      recordsToCopy = [row._record];
+      break;
+
+    case 'COPY_ROW_JSON':
+      recordsToCopy = [row._record];
+      format = 'json';
+      break;
+
+    case 'COPY_COL':
+      fieldsToCopy = fieldsToCopy.filter((field) => field === column.key);
+      recordsToCopy = records.map((row) => ({ [column.key]: row[column.key] }));
+      format = 'excel';
+      break;
+
+    case 'COPY_COL_JSON':
+      fieldsToCopy = fieldsToCopy.filter((field) => field === column.key);
+      recordsToCopy = records.map((row) => ({ [column.key]: row[column.key] }));
+      format = 'json';
+      break;
+
+    case 'COPY_COL_NO_HEADER':
+      includeHeader = false;
+      fieldsToCopy = fieldsToCopy.filter((field) => field === column.key);
+      recordsToCopy = records.map((row) => ({ [column.key]: row[column.key] }));
+      format = 'plain';
+      break;
+
+    case 'COPY_TABLE':
+      recordsToCopy = records;
+      break;
+
+    case 'COPY_TABLE_JSON':
+      recordsToCopy = records;
+      format = 'json';
+      break;
+
+    default:
+      break;
+  }
+  if (recordsToCopy.length) {
+    if (format === 'json') {
+      copyRecordsToClipboard(recordsToCopy, 'json');
+    } else {
+      copyRecordsToClipboard(recordsToCopy, 'excel', fieldsToCopy, includeHeader);
+    }
+  }
 }

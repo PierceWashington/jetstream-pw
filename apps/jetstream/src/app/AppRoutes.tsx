@@ -1,46 +1,77 @@
-import { UserProfileUi } from '@jetstream/types';
-import lazy from './components/core/LazyLoad';
-import React, { useEffect } from 'react';
-
+import { Maybe, UserProfileUi } from '@jetstream/types';
+import { APP_ROUTES, AppHome, OrgSelectionRequired } from '@jetstream/ui-core';
+import { useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import OrgSelectionRequired from './components/orgs/OrgSelectionRequired';
+import lazy from './components/core/LazyLoad';
 
-const LoadRecords = lazy(() => import('./components/load-records/LoadRecords'));
-const LoadRecordsMultiObject = lazy(() => import('./components/load-records-multi-object/LoadRecordsMultiObject'));
+const LoadRecords = lazy(() => import('@jetstream/feature/load-records').then((module) => ({ default: module.LoadRecords })));
+const LoadRecordsMultiObject = lazy(() =>
+  import('@jetstream/feature/load-records-multi-object').then((module) => ({ default: module.LoadRecordsMultiObject }))
+);
 
-const Query = lazy(() => import('./components/query/Query'));
-const QueryBuilder = lazy(() => import('./components/query/QueryBuilder/QueryBuilder'));
-const QueryResults = lazy(() => import('./components/query/QueryResults/QueryResults'));
+const Query = lazy(() => import('@jetstream/feature/query').then((module) => ({ default: module.Query })));
+const QueryBuilder = lazy(() => import('@jetstream/feature/query').then((module) => ({ default: module.QueryBuilder })));
+const QueryResults = lazy(() => import('@jetstream/feature/query').then((module) => ({ default: module.QueryResults })));
 
-const AutomationControl = lazy(() => import('./components/automation-control/AutomationControl'));
-const AutomationControlSelection = lazy(() => import('./components/automation-control/AutomationControlSelection'));
-const AutomationControlEditor = lazy(() => import('./components/automation-control/AutomationControlEditor'));
+const AutomationControl = lazy(() =>
+  import('@jetstream/feature/automation-control').then((module) => ({ default: module.AutomationControl }))
+);
+const AutomationControlEditor = lazy(() =>
+  import('@jetstream/feature/automation-control').then((module) => ({ default: module.AutomationControlEditor }))
+);
+const AutomationControlSelection = lazy(() =>
+  import('@jetstream/feature/automation-control').then((module) => ({ default: module.AutomationControlSelection }))
+);
 
-const ManagePermissions = lazy(() => import('./components/manage-permissions/ManagePermissions'));
-const ManagePermissionsEditor = lazy(() => import('./components/manage-permissions/ManagePermissionsEditor'));
-const ManagePermissionsSelection = lazy(() => import('./components/manage-permissions/ManagePermissionsSelection'));
+const ManagePermissions = lazy(() =>
+  import('@jetstream/feature/manage-permissions').then((module) => ({ default: module.ManagePermissions }))
+);
+const ManagePermissionsSelection = lazy(() =>
+  import('@jetstream/feature/manage-permissions').then((module) => ({ default: module.ManagePermissionsSelection }))
+);
+const ManagePermissionsEditor = lazy(() =>
+  import('@jetstream/feature/manage-permissions').then((module) => ({ default: module.ManagePermissionsEditor }))
+);
 
-const DeployMetadata = lazy(() => import('./components/deploy/DeployMetadata'));
-const DeployMetadataSelection = lazy(() => import('./components/deploy/DeployMetadataSelection'));
-const DeployMetadataDeployment = lazy(() => import('./components/deploy/DeployMetadataDeployment'));
+const DeployMetadata = lazy(() => import('@jetstream/feature/deploy').then((module) => ({ default: module.DeployMetadata })));
+const DeployMetadataSelection = lazy(() =>
+  import('@jetstream/feature/deploy').then((module) => ({ default: module.DeployMetadataSelection }))
+);
+const DeployMetadataDeployment = lazy(() =>
+  import('@jetstream/feature/deploy').then((module) => ({ default: module.DeployMetadataDeployment }))
+);
 
-const CreateObjectAndFields = lazy(() => import('./components/create-object-and-fields/CreateObjectAndFields'));
-const CreateFieldsSelection = lazy(() => import('./components/create-object-and-fields/CreateFieldsSelection'));
-const CreateFields = lazy(() => import('./components/create-object-and-fields/CreateFields'));
+const CreateObjectAndFields = lazy(() =>
+  import('@jetstream/feature/create-object-and-fields').then((module) => ({ default: module.CreateObjectAndFields }))
+);
+const CreateFieldsSelection = lazy(() =>
+  import('@jetstream/feature/create-object-and-fields').then((module) => ({ default: module.CreateFieldsSelection }))
+);
+const CreateFields = lazy(() => import('@jetstream/feature/create-object-and-fields').then((module) => ({ default: module.CreateFields })));
 
-const MassUpdateRecords = lazy(() => import('./components/update-records/MassUpdateRecords'));
-const MassUpdateRecordsSelection = lazy(() => import('./components/update-records/selection/MassUpdateRecordsSelection'));
-const MassUpdateRecordsDeployment = lazy(() => import('./components/update-records/deployment/MassUpdateRecordsDeployment'));
+const FormulaEvaluator = lazy(() =>
+  import('@jetstream/feature/formula-evaluator').then((module) => ({ default: module.FormulaEvaluator }))
+);
 
-const AnonymousApex = lazy(() => import('./components/anonymous-apex/AnonymousApex'));
+const MassUpdateRecords = lazy(() => import('@jetstream/feature/update-records').then((module) => ({ default: module.MassUpdateRecords })));
+const MassUpdateRecordsSelection = lazy(() =>
+  import('@jetstream/feature/update-records').then((module) => ({ default: module.MassUpdateRecordsSelection }))
+);
+const MassUpdateRecordsDeployment = lazy(() =>
+  import('@jetstream/feature/update-records').then((module) => ({ default: module.MassUpdateRecordsDeployment }))
+);
 
-const SalesforceApi = lazy(() => import('./components/salesforce-api/SalesforceApi'));
+const AnonymousApex = lazy(() => import('@jetstream/feature/anon-apex').then((module) => ({ default: module.AnonymousApex })));
 
-const DebugLogViewer = lazy(() => import('./components/debug-log-viewer/DebugLogViewer'));
+const SalesforceApi = lazy(() => import('@jetstream/feature/salesforce-api').then((module) => ({ default: module.SalesforceApi })));
 
-const SObjectExport = lazy(() => import('./components/sobject-export/SObjectExport'));
+const DebugLogViewer = lazy(() => import('@jetstream/feature/debug-log-viewer').then((module) => ({ default: module.DebugLogViewer })));
 
-const PlatformEventMonitor = lazy(() => import('./components/platform-event-monitor/PlatformEventMonitor'));
+const SObjectExport = lazy(() => import('@jetstream/feature/sobject-export').then((module) => ({ default: module.SObjectExport })));
+
+const PlatformEventMonitor = lazy(() =>
+  import('@jetstream/feature/platform-event-monitor').then((module) => ({ default: module.PlatformEventMonitor }))
+);
 
 const Feedback = lazy(() => import('./components/feedback/Feedback'));
 
@@ -48,13 +79,13 @@ const Settings = lazy(() => import('./components/settings/Settings'));
 
 export interface AppRoutesProps {
   featureFlags: Set<string>;
-  userProfile: UserProfileUi;
+  userProfile: Maybe<UserProfileUi>;
 }
 
 export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
   const location = useLocation();
 
-  // Preload sub-pages
+  // Preload sub-pages if user is on parent page
   useEffect(() => {
     if (location.pathname.includes('/query')) {
       QueryResults.preload();
@@ -64,7 +95,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
       ManagePermissionsEditor.preload();
     } else if (location.pathname.includes('/deploy-metadata')) {
       DeployMetadataDeployment.preload();
-    } else if (location.pathname.includes('/deploy-sobject-metadata')) {
+    } else if (location.pathname.includes('/create-fields')) {
       CreateFields.preload();
     } else if (location.pathname.includes('/update-records')) {
       MassUpdateRecordsDeployment.preload();
@@ -73,8 +104,11 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
 
   return (
     <Routes>
+      {/* This is just here to allow testing the error page without having a real error - can uncomment for testing */}
+      {/* <Route path={'/error'} element={<ErrorBoundaryFallback error={new Error('test')} resetErrorBoundary={NOOP} />} /> */}
+      <Route path={APP_ROUTES.HOME.ROUTE} element={<AppHome />} />
       <Route
-        path="/query"
+        path={APP_ROUTES.QUERY.ROUTE}
         element={
           <OrgSelectionRequired>
             <Query />
@@ -86,7 +120,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         <Route path="*" element={<Navigate to=".." />} />
       </Route>
       <Route
-        path="/load"
+        path={APP_ROUTES.LOAD.ROUTE}
         element={
           <OrgSelectionRequired>
             <LoadRecords featureFlags={featureFlags} />
@@ -94,7 +128,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         }
       />
       <Route
-        path="/load-multiple-objects"
+        path={APP_ROUTES.LOAD_MULTIPLE.ROUTE}
         element={
           <OrgSelectionRequired>
             <LoadRecordsMultiObject featureFlags={featureFlags} />
@@ -102,7 +136,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         }
       />
       <Route
-        path="/automation-control"
+        path={APP_ROUTES.AUTOMATION_CONTROL.ROUTE}
         element={
           <OrgSelectionRequired>
             <AutomationControl />
@@ -114,7 +148,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         <Route path="*" element={<Navigate to=".." />} />
       </Route>
       <Route
-        path="/permissions-manager"
+        path={APP_ROUTES.PERMISSION_MANAGER.ROUTE}
         element={
           <OrgSelectionRequired>
             <ManagePermissions />
@@ -126,7 +160,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         <Route path="*" element={<Navigate to=".." />} />
       </Route>
       <Route
-        path="/deploy-metadata"
+        path={APP_ROUTES.DEPLOY_METADATA.ROUTE}
         element={
           <OrgSelectionRequired>
             <DeployMetadata />
@@ -138,7 +172,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         <Route path="*" element={<Navigate to=".." />} />
       </Route>
       <Route
-        path="/deploy-sobject-metadata"
+        path={APP_ROUTES.CREATE_FIELDS.ROUTE}
         element={
           <OrgSelectionRequired>
             <CreateObjectAndFields />
@@ -150,7 +184,15 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         <Route path="*" element={<Navigate to=".." />} />
       </Route>
       <Route
-        path="/update-records"
+        path={APP_ROUTES.FORMULA_EVALUATOR.ROUTE}
+        element={
+          <OrgSelectionRequired>
+            <FormulaEvaluator />
+          </OrgSelectionRequired>
+        }
+      />
+      <Route
+        path={APP_ROUTES.LOAD_MASS_UPDATE.ROUTE}
         element={
           <OrgSelectionRequired>
             <MassUpdateRecords />
@@ -162,7 +204,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         <Route path="*" element={<Navigate to=".." />} />
       </Route>
       <Route
-        path="/apex"
+        path={APP_ROUTES.ANON_APEX.ROUTE}
         element={
           <OrgSelectionRequired>
             <AnonymousApex />
@@ -170,7 +212,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         }
       />
       <Route
-        path="/salesforce-api"
+        path={APP_ROUTES.SALESFORCE_API.ROUTE}
         element={
           <OrgSelectionRequired>
             <SalesforceApi />
@@ -178,7 +220,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         }
       />
       <Route
-        path="/debug-logs"
+        path={APP_ROUTES.DEBUG_LOG_VIEWER.ROUTE}
         element={
           <OrgSelectionRequired>
             <DebugLogViewer />
@@ -186,7 +228,7 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         }
       />
       <Route
-        path="/platform-event-monitor"
+        path={APP_ROUTES.PLATFORM_EVENT_MONITOR.ROUTE}
         element={
           <OrgSelectionRequired>
             <PlatformEventMonitor />
@@ -194,16 +236,16 @@ export const AppRoutes = ({ featureFlags, userProfile }: AppRoutesProps) => {
         }
       />
       <Route
-        path="/object-export"
+        path={APP_ROUTES.OBJECT_EXPORT.ROUTE}
         element={
           <OrgSelectionRequired>
             <SObjectExport />
           </OrgSelectionRequired>
         }
       />
-      <Route path="/feedback" element={<Feedback userProfile={userProfile} />} />
-      <Route path="/settings" element={<Settings featureFlags={featureFlags} userProfile={userProfile} />} />
-      <Route path="*" element={<Navigate to="/query" />} />
+      <Route path={APP_ROUTES.FEEDBACK_SUPPORT.ROUTE} element={<Feedback />} />
+      <Route path={APP_ROUTES.SETTINGS.ROUTE} element={<Settings featureFlags={featureFlags} userProfile={userProfile} />} />
+      <Route path="*" element={<Navigate to={APP_ROUTES.HOME.ROUTE} />} />
     </Routes>
   );
 };

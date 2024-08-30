@@ -24,12 +24,19 @@ import { DeleteResult } from './utils/types';
     q: `_exists_:app_metadata.accountDeletionDate`,
   };
 
-  logger.debug('[inactive-account-deletion][FETCHING USERS] %o', { accountDeletionDate, params }, { cronTask: true });
+  logger.debug({ accountDeletionDate, params }, '[inactive-account-deletion][FETCHING USERS]');
 
   const cutoff = endOfDay(new Date());
-  const usersToDelete = (await searchUsersPaginateAll(params)).filter((user) =>
-    isBefore(parseISO(user.app_metadata.accountDeletionDate), cutoff)
-  );
+  const usersToDelete = (await searchUsersPaginateAll(params)).filter((user) => {
+    try {
+      if (!user.app_metadata.accountDeletionDate) {
+        return false;
+      }
+      return isBefore(parseISO(user.app_metadata.accountDeletionDate), cutoff);
+    } catch (ex) {
+      return false;
+    }
+  });
 
   const results: DeleteResult[] = [];
 
@@ -45,7 +52,7 @@ import { DeleteResult } from './utils/types';
     try {
       // delete from Auth0
       await deleteUser(user.user_id);
-      logger.debug('[inactive-account-deletion][Deleted from Auth0] %o', { userId: user.user_id }, { cronTask: true });
+      logger.debug({ userId: user.user_id }, '[inactive-account-deletion][Deleted from Auth0]');
 
       try {
         // delete locally
@@ -53,11 +60,7 @@ import { DeleteResult } from './utils/types';
         result.orgCount = orgCount;
         result.localDatabaseId = userId;
 
-        logger.debug(
-          '[inactive-account-deletion][Marked as deleted locally] %o',
-          { userId: user.user_id, orgCount, localDatabaseId: userId },
-          { cronTask: true }
-        );
+        logger.debug({ userId: user.user_id, orgCount, localDatabaseId: userId }, '[inactive-account-deletion][Marked as deleted locally]');
       } catch (ex) {
         // failed to mark as deleted locally
         result.localDeleteSuccess = false;
@@ -72,8 +75,8 @@ import { DeleteResult } from './utils/types';
   // Slack message
   try {
     await accountDeletionInitialNotification(results);
-    logger.debug('[inactive-account-deletion][Slack messages sent successfully]', { cronTask: true });
+    logger.debug('[inactive-account-deletion][Slack messages sent successfully]');
   } catch (ex) {
-    logger.debug('[inactive-account-deletion][Slack messages error]', { cronTask: true });
+    logger.debug('[inactive-account-deletion][Slack messages error]');
   }
 })();

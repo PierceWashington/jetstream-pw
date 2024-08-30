@@ -3,41 +3,26 @@ import { logger } from '@jetstream/shared/client-logger';
 import { HTTP } from '@jetstream/shared/constants';
 import { checkHeartbeat, registerMiddleware } from '@jetstream/shared/data';
 import { useObservable, useRollbar } from '@jetstream/shared/ui-utils';
-import { ApplicationCookie, ElectronPreferences, SalesforceOrgUi, UserProfileUi } from '@jetstream/types';
+import { ApplicationCookie, SalesforceOrgUi, UserProfileUi } from '@jetstream/types';
+import { fromAppState, useAmplitude, usePageViews } from '@jetstream/ui-core';
 import { AxiosResponse } from 'axios';
 import localforage from 'localforage';
 import React, { Fragment, FunctionComponent, useCallback, useEffect } from 'react';
 import { useRecoilState, useRecoilValue } from 'recoil';
 import { Subject } from 'rxjs';
 import { environment } from '../../../environments/environment';
-import * as fromAppState from '../../app-state';
-import { useAmplitude, usePageViews } from './analytics';
-
-const browserVersion = process.env.GIT_VERSION;
-if (browserVersion) {
-  console.log('JETSTREAM VERSION:', browserVersion);
-}
 
 const orgConnectionError = new Subject<{ uniqueId: string; connectionError: string }>();
 const orgConnectionError$ = orgConnectionError.asObservable();
 
-export const preferencesChanged = new Subject<ElectronPreferences>();
-const preferencesChanged$ = preferencesChanged.asObservable();
-
 registerMiddleware('Error', (response: AxiosResponse, org?: SalesforceOrgUi) => {
   const connectionError =
-    response.headers[HTTP.HEADERS.X_SFDC_ORG_CONNECTION_ERROR.toLowerCase()] || response.headers[HTTP.HEADERS.X_SFDC_ORG_CONNECTION_ERROR];
+    response?.headers?.[HTTP.HEADERS.X_SFDC_ORG_CONNECTION_ERROR.toLowerCase()] ||
+    response?.headers?.[HTTP.HEADERS.X_SFDC_ORG_CONNECTION_ERROR];
   if (org && connectionError) {
     orgConnectionError.next({ uniqueId: org.uniqueId, connectionError });
   }
 });
-
-if (window.electron?.onPreferencesChanged) {
-  window.electron?.onPreferencesChanged((_event, preferences) => {
-    logger.info('[ELEcTRON PREFERENCES][CHANGED]', preferences);
-    preferencesChanged.next(preferences);
-  });
-}
 
 // Configure IndexedDB database
 localforage.config({
@@ -51,33 +36,23 @@ export interface AppInitializerProps {
 
 export const AppInitializer: FunctionComponent<AppInitializerProps> = ({ onUserProfile, children }) => {
   const userProfile = useRecoilValue<UserProfileUi>(fromAppState.userProfileState);
+  const { version } = useRecoilValue(fromAppState.appVersionState);
   const appCookie = useRecoilValue<ApplicationCookie>(fromAppState.applicationCookieState);
   const [orgs, setOrgs] = useRecoilState(fromAppState.salesforceOrgsState);
-  const [electronPreferencesState, setElectronPreferencesState] = useRecoilState(fromAppState.electronPreferences);
   const invalidOrg = useObservable(orgConnectionError$);
-  const electronPreferences = useObservable(preferencesChanged$);
-
-  useRollbar(
-    {
-      accessToken: environment.rollbarClientAccessToken,
-      environment: appCookie.environment,
-      userProfile: userProfile,
-    },
-    electronPreferencesState && !electronPreferencesState.crashReportingOptIn
-  );
-  useAmplitude(electronPreferencesState && !electronPreferencesState.analyticsOptIn);
-  usePageViews();
 
   useEffect(() => {
-    if (electronPreferences) {
-      setElectronPreferencesState(electronPreferences);
-      if (!electronPreferences.analyticsOptIn) {
-        window['ga-disable-MEASUREMENT_ID'] = true;
-      } else {
-        window['ga-disable-MEASUREMENT_ID'] = false;
-      }
-    }
-  }, [electronPreferences, setElectronPreferencesState]);
+    console.log('APP VERSION', version);
+  }, [version]);
+
+  useRollbar({
+    accessToken: environment.rollbarClientAccessToken,
+    environment: appCookie.environment,
+    userProfile: userProfile,
+    version,
+  });
+  useAmplitude();
+  usePageViews();
 
   useEffect(() => {
     if (invalidOrg) {
@@ -112,8 +87,8 @@ export const AppInitializer: FunctionComponent<AppInitializerProps> = ({ onUserP
         const { version: serverVersion } = await checkHeartbeat();
         // TODO: inform user that there is a new version and that they should refresh their browser.
         // We could force refresh, but don't want to get into some weird infinite refresh state
-        if (browserVersion !== serverVersion) {
-          console.log('VERSION MISMATCH', { serverVersion, browserVersion });
+        if (version !== serverVersion) {
+          console.log('VERSION MISMATCH', { serverVersion, version });
         }
       }
     } catch (ex) {

@@ -1,12 +1,13 @@
 import { css } from '@emotion/react';
+import { logger } from '@jetstream/shared/client-logger';
 import { polyfillFieldDefinition } from '@jetstream/shared/ui-utils';
-import { ListItem, PicklistFieldValueItem } from '@jetstream/types';
+import { Field, ListItem, Maybe, PicklistFieldValueItem, RecordAttributes } from '@jetstream/types';
 import { Checkbox, DatePicker, DateTime, Grid, Icon, Input, Picklist, ReadOnlyFormElement, Textarea, TimePicker } from '@jetstream/ui';
 import classNames from 'classnames';
-import formatISO from 'date-fns/formatISO';
-import parseISO from 'date-fns/parseISO';
-import roundToNearestMinutes from 'date-fns/roundToNearestMinutes';
-import startOfDay from 'date-fns/startOfDay';
+import { formatISO } from 'date-fns/formatISO';
+import { parseISO } from 'date-fns/parseISO';
+import { roundToNearestMinutes } from 'date-fns/roundToNearestMinutes';
+import { startOfDay } from 'date-fns/startOfDay';
 import uniqueId from 'lodash/uniqueId';
 import { Fragment, FunctionComponent, ReactNode, SyntheticEvent, useEffect, useState } from 'react';
 import { EditableFields } from './ui-record-form-types';
@@ -14,13 +15,21 @@ import { isCheckbox, isDate, isDateTime, isInput, isPicklist, isTextarea, isTime
 
 const REPLACE_NON_NUMERIC = /[^\d.-]/g;
 
-function getInitialValue(initialValue: string | boolean | null, field: EditableFields): string | string[] | boolean {
+function getInitialValue(initialValue: string | boolean | null, field: EditableFields): string | string[] | boolean | null {
   if (initialValue) {
     const { metadata } = field;
     if (metadata.type === 'date') {
-      return formatISO(startOfDay(parseISO(initialValue as string)));
+      try {
+        return formatISO(startOfDay(parseISO(initialValue as string)));
+      } catch (ex) {
+        logger.warn('Error parsing date value', ex);
+      }
     } else if (metadata.type === 'datetime') {
-      return formatISO(roundToNearestMinutes(parseISO(initialValue as string)));
+      try {
+        return formatISO(roundToNearestMinutes(parseISO(initialValue as string)));
+      } catch (ex) {
+        logger.warn('Error parsing datetime value', ex);
+      }
     } else if (metadata.type === 'picklist') {
       return [initialValue as string];
     } else if (metadata.type === 'multipicklist') {
@@ -32,7 +41,11 @@ function getInitialValue(initialValue: string | boolean | null, field: EditableF
   return initialValue;
 }
 
-function getInitialModifiedValue(modifiedValue: string | boolean | null, initialValue: string | boolean | string[], field: EditableFields) {
+function getInitialModifiedValue(
+  modifiedValue: string | boolean | null,
+  initialValue: string | boolean | string[] | null,
+  field: EditableFields
+) {
   if (modifiedValue !== null && modifiedValue !== undefined) {
     return getInitialValue(modifiedValue, field);
   }
@@ -45,10 +58,14 @@ export interface UiRecordFormFieldProps {
   disabled?: boolean;
   initialValue: string | boolean | null;
   modifiedValue: string | boolean | null;
+  relatedRecord?: Maybe<{ attributes: RecordAttributes; Name: string }>;
   showFieldTypes: boolean;
   omitUndoIndicator?: boolean;
+  hideLabel?: boolean;
+  usePortal?: boolean;
   // picklist values are converted to strings prior to emitting
   onChange: (field: EditableFields, value: string | boolean | null, isDirty: boolean) => void;
+  viewRelatedRecord?: (recordId: string, metadata: Field) => void;
 }
 
 function getUndoKey(name: string) {
@@ -60,9 +77,13 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
   disabled,
   initialValue: _initialValue,
   modifiedValue,
+  relatedRecord,
   showFieldTypes,
   omitUndoIndicator,
+  hideLabel = false,
+  usePortal = false,
   onChange,
+  viewRelatedRecord,
 }) => {
   const { label, name, labelHelpText, readOnly, metadata } = field;
   const required = !readOnly && field.required;
@@ -104,7 +125,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
 
   function checkIfDirty(
     isDirty: boolean,
-    valueOverride?: string | string[] | boolean
+    valueOverride?: string | string[] | boolean | null
   ): { value: string | boolean | null; isDirty: boolean } {
     const priorDirtyValue = isDirty;
     let newDirtyValue = isDirty;
@@ -135,7 +156,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
     };
   }
 
-  function checkIfDirtyAndEmit(valueOverride?: string | string[] | boolean) {
+  function checkIfDirtyAndEmit(valueOverride?: string | string[] | boolean | null) {
     if (!readOnly) {
       const dirtyValue = checkIfDirty(isDirty, valueOverride);
       if (isDirty !== dirtyValue.isDirty) {
@@ -223,6 +244,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
         {readOnly && (
           <ReadOnlyFormElement
             id={id}
+            metadata={metadata}
             label={label}
             className="slds-m-bottom_x-small"
             errorMessage={saveError}
@@ -233,6 +255,8 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
             errorMessageId={`${id}-error`}
             value={(value as string) || ''}
             bottomBorder
+            relatedRecord={relatedRecord}
+            viewRelatedRecord={viewRelatedRecord}
           />
         )}
 
@@ -242,6 +266,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
               <Input
                 id={id}
                 label={label}
+                hideLabel={hideLabel}
                 className="slds-form-element_stacked slds-is-editing"
                 errorMessage={saveError}
                 labelHelp={labelHelpText}
@@ -272,6 +297,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
                 id={id}
                 checked={!!value}
                 label={label}
+                hideLabel={hideLabel}
                 className="slds-form-element_stacked slds-is-editing"
                 isStandAlone
                 errorMessage={saveError}
@@ -289,6 +315,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
                 key={key}
                 id={id}
                 label={label}
+                hideLabel={hideLabel}
                 className="slds-form-element_stacked slds-is-editing"
                 containerDisplay="contents"
                 errorMessage={saveError}
@@ -299,6 +326,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
                 errorMessageId={`${id}-error`}
                 initialSelectedDate={initialSelectedDate}
                 disabled={disabled}
+                usePortal={usePortal}
                 onChange={handleDateChange}
               />
             )}
@@ -313,15 +341,18 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
                   className: 'slds-form-element_stacked slds-is-editing',
                   containerDisplay: 'contents',
                   errorMessage: saveError,
+                  hideLabel,
                   labelHelp: labelHelpText,
                   helpText: helpText,
                   isRequired: !readOnly && required,
                   hasError: !!saveError,
                   errorMessageId: `${id}-error`,
                   disabled: disabled,
+                  usePortal,
                 }}
                 timeProps={{
                   label: 'Time',
+                  hideLabel,
                   className: 'slds-form-element_stacked slds-is-editing',
                   stepInMinutes: 1,
                   disabled: disabled,
@@ -334,6 +365,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
               <TimePicker
                 id={id}
                 label={label}
+                hideLabel={hideLabel}
                 className="slds-form-element_stacked slds-is-editing"
                 errorMessage={saveError}
                 labelHelp={labelHelpText}
@@ -352,6 +384,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
               <Textarea
                 id={id}
                 label={label}
+                hideLabel={hideLabel}
                 className="slds-form-element_stacked slds-is-editing"
                 errorMessage={saveError}
                 labelHelp={labelHelpText}
@@ -379,6 +412,7 @@ export const UiRecordFormField: FunctionComponent<UiRecordFormFieldProps> = ({
                 key={key}
                 id={id}
                 label={label}
+                hideLabel={hideLabel}
                 className="slds-form-element_stacked slds-is-editing"
                 containerDisplay="contents"
                 omitMultiSelectPills

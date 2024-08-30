@@ -1,11 +1,11 @@
 import { css } from '@emotion/react';
 import { getFieldKey } from '@jetstream/shared/ui-utils';
-import { FieldWrapper, MapOf, QueryFields, SalesforceOrgUi } from '@jetstream/types';
-import { useHighlightedText } from 'libs/ui/src/lib/hooks/useHighlightedText';
-import Icon from 'libs/ui/src/lib/widgets/Icon';
-import Tooltip from 'libs/ui/src/lib/widgets/Tooltip';
+import { FieldWrapper, QueryFields, SalesforceOrgUi } from '@jetstream/types';
 import { Fragment, FunctionComponent, useEffect, useState } from 'react';
 import Grid from '../grid/Grid';
+import { useHighlightedText } from '../hooks/useHighlightedText';
+import Icon from '../widgets/Icon';
+import Tooltip from '../widgets/Tooltip';
 import SobjectExpandChildrenBtn from './SobjectExpandChildrenBtn';
 import SobjectFieldList from './SobjectFieldList';
 import SobjectFieldListMetadataWarning from './SobjectFieldListMetadataWarning';
@@ -19,7 +19,7 @@ export interface SobjectFieldListItemProps {
   level: number;
   parentKey: string;
   field: FieldWrapper;
-  queryFieldsMap: MapOf<QueryFields>;
+  queryFieldsMap: Record<string, QueryFields>;
   searchTerm?: string;
   highlightText?: boolean;
   onToggleExpand: (key: string, field: FieldWrapper, relatedSobject: string) => void;
@@ -45,9 +45,11 @@ export const SobjectFieldListItem: FunctionComponent<SobjectFieldListItemProps> 
   onFilterChanged,
   errorReattempt,
 }) => {
-  const [relationshipKey, setRelationshipKey] = useState<string>(null);
+  const [relationshipKey, setRelationshipKey] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState<boolean>(false);
-  const [selectedSObject, setSelectedSObject] = useState(queryFieldsMap[relationshipKey]?.sobject);
+  const [selectedSObject, setSelectedSObject] = useState(() => {
+    return relationshipKey && queryFieldsMap[relationshipKey]?.sobject;
+  });
   const fieldLabel = useHighlightedText(field.label, searchTerm, { ignoreHighlight: !highlightText });
   const fieldName = useHighlightedText(field.name, searchTerm, { ignoreHighlight: !highlightText });
 
@@ -69,6 +71,8 @@ export const SobjectFieldListItem: FunctionComponent<SobjectFieldListItemProps> 
   useEffect(() => {
     if (relationshipKey && field.relatedSobject) {
       setIsExpanded(queryFieldsMap[relationshipKey]?.expanded || false);
+      // Ensure that on query restore, the selected sobject is set otherwise the child list will not render
+      queryFieldsMap[relationshipKey]?.expanded && setSelectedSObject(queryFieldsMap[relationshipKey]?.sobject);
     }
   }, [relationshipKey, field, queryFieldsMap]);
 
@@ -107,7 +111,7 @@ export const SobjectFieldListItem: FunctionComponent<SobjectFieldListItemProps> 
         </div>
         <SobjectFieldListType org={org} field={field} />
       </div>
-      {field.relatedSobject && level < 5 && (
+      {field.relatedSobject && level < 5 && relationshipKey && (
         <div
           css={css`
             margin-left: -1.75rem;
@@ -124,9 +128,10 @@ export const SobjectFieldListItem: FunctionComponent<SobjectFieldListItemProps> 
             allowMultiple={level === 0}
             onToggleExpand={handleExpand}
           />
-          {isExpanded && (
+          {isExpanded && selectedSObject && (
             <div>
               <SobjectFieldList
+                key={selectedSObject}
                 org={org}
                 serverUrl={serverUrl}
                 isTooling={isTooling}

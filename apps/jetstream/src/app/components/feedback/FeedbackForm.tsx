@@ -1,15 +1,15 @@
 import { css } from '@emotion/react';
 import { TITLES } from '@jetstream/shared/constants';
+import { useTitle } from '@jetstream/shared/ui-utils';
 import { Card, FeedbackLink, Grid, Icon } from '@jetstream/ui';
 import { FunctionComponent, useRef } from 'react';
-import { useTitle } from 'react-use';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface FeedbackFormProps {}
 
 export const FeedbackForm: FunctionComponent<FeedbackFormProps> = () => {
   useTitle(TITLES.FEEDBACK);
-  const cardRef = useRef<HTMLElement>();
+  const cardRef = useRef<HTMLElement>(null);
 
   return (
     <Card
@@ -38,20 +38,19 @@ export const FeedbackForm: FunctionComponent<FeedbackFormProps> = () => {
             </li>
           </ol>
         </div>
-        <hr />
+        <hr className="slds-m-vertical_medium" />
         <div>
-          <p>Jetstream is an open source project and is paid for and supported by volunteers.</p>
-          {process.env.NX_SHOW_DONATION && (
-            <a
-              href="https://github.com/sponsors/jetstreamapp"
-              className="slds-button slds-button_brand slds-m-top_medium"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Icon type="custom" icon="heart" className="slds-button__icon slds-m-right_x-small" omitContainer />
-              Become a sponsor or make a donation
-            </a>
-          )}
+          <h3 className="slds-text-heading_small slds-m-bottom_small">Support the Jetstream project</h3>
+          <p>Jetstream is source-available project and is paid for and supported by the community.</p>
+          <a
+            href="https://github.com/sponsors/jetstreamapp"
+            className="slds-button slds-button_brand slds-m-top_medium"
+            target="_blank"
+            rel="noreferrer"
+          >
+            <Icon type="custom" icon="heart" className="slds-button__icon slds-m-right_x-small" omitContainer />
+            Become a sponsor
+          </a>
         </div>
       </Grid>
     </Card>

@@ -1,5 +1,5 @@
 {
-  "extends": "../../.eslintrc.json",
+  "extends": "../../../.eslintrc.json",
   "rules": {},
   "ignorePatterns": ["!**/*"],
   "overrides": [
@@ -8,7 +8,20 @@
       "parserOptions": {
         "project": ["libs/shared/utils/tsconfig.*?.json"]
       },
-      "rules": {}
+      "rules": {
+        "@typescript-eslint/ban-ts-comment": "warn",
+        "no-restricted-imports": [
+          "error",
+          {
+            "paths": [
+              {
+                "name": "lodash",
+                "message": "Import [module] from lodash/[module] instead"
+              }
+            ]
+          }
+        ]
+      }
     },
     {
       "files": ["*.ts", "*.tsx"],

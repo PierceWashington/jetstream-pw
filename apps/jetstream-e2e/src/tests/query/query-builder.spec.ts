@@ -1,12 +1,13 @@
 import { expect, test } from '../../fixtures/fixtures';
 
 test.beforeEach(async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/app');
 });
 
 test.describe.configure({ mode: 'parallel' });
 
 test.describe('QUERY BUILDER', () => {
+  // TODO: add test for drilling in to related query filters
   test('should work with filters', async ({ queryPage }) => {
     await queryPage.goto();
     await queryPage.selectObject('Account');
@@ -57,7 +58,7 @@ test.describe('QUERY BUILDER', () => {
       ')',
     ]);
 
-    await queryPage.addOrderBy('Created Date', 'DESC', 'LAST');
+    await queryPage.addOrderBy('Created Date', 'DESC', 'LAST', 1);
 
     await queryPage.validateQueryByLine([
       'SELECT Id, Name, CreatedBy.Id, CreatedBy.Name, CreatedBy.AccountId, CreatedBy.Address,',

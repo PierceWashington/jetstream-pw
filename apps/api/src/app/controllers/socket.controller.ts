@@ -1,22 +1,16 @@
-import { ENV, logger } from '@jetstream/api-config';
+import { getExceptionLog, logger } from '@jetstream/api-config';
 import { UserProfileServer } from '@jetstream/types';
 import * as cometdClient from 'cometd-nodejs-client';
 import * as express from 'express';
-import { createServer, IncomingMessage } from 'http';
+import { IncomingMessage, createServer } from 'http';
+import { nanoid } from 'nanoid';
 import { Server, Socket } from 'socket.io';
 import { ExtendedError } from 'socket.io/dist/namespace';
 import { DefaultEventsMap } from 'socket.io/dist/typed-events';
-import { nanoid } from 'nanoid';
 import { environment } from '../../environments/environment';
 import * as socketUtils from '../utils/socket-utils';
 
-const serverUrl = ENV.JETSTREAM_SERVER_URL;
 cometdClient.adapt();
-
-/**
- * FIXME: https://socket.io/docs/v4/pm2/
- * pm2 will cause issues!
- */
 
 let io: Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap>;
 
@@ -91,25 +85,25 @@ export function initSocketServer(app: express.Express, middlewareFns: express.Re
       socket,
       cometdConnections: {},
     };
-    logger.debug('[SOCKET][CONNECT] %s', socket.id, { socketId: socket.id, userId: user?.id || 'unknown' });
+    logger.debug({ socketId: socket.id, userId: user?.id || 'unknown' }, '[SOCKET][CONNECT] %s', socket.id);
     if (user) {
       socket.join(user.id);
     }
 
     // server namespace disconnect, client namespace disconnect, server shutting down, ping timeout, transport close, transport error
     socket.on('disconnect', (reason) => {
-      logger.debug('[SOCKET][DISCONNECT] %s', reason, { socketId: socket.id, userId: user?.id || 'unknown' });
+      logger.debug({ socketId: socket.id, userId: user?.id || 'unknown' }, '[SOCKET][DISCONNECT] %s', reason);
       // TODO: should we distinguish specific reason for disconnect before unsubscribing from cometd?
       // If browser did not really disconnect, how will it know that it is no longer subscribed to cometd?
       Object.values(userSocketState.cometdConnections).forEach(({ cometd, subscriptions }) => {
-        socketUtils.disconnectCometD(cometd, socket, user);
+        cometd && socketUtils.disconnectCometD(cometd, socket, user);
         subscriptions.clear();
       });
       userSocketState.cometdConnections = {};
     });
 
     socket.on('error', (err) => {
-      logger.warn('[SOCKET][ERROR] %s', err.message, { socketId: socket.id, userId: user?.id || 'unknown' });
+      logger.warn({ socketId: socket.id, userId: user?.id || 'unknown', ...getExceptionLog(err) }, '[SOCKET][ERROR] %s', err.message);
     });
 
     /**

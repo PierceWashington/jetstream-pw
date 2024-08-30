@@ -2,7 +2,7 @@
 import { logger } from '@jetstream/shared/client-logger';
 import { INDEXED_DB } from '@jetstream/shared/constants';
 import { REGEX } from '@jetstream/shared/utils';
-import { CacheItemWithData, MapOf, OrgCacheItem, QueryHistoryItem, SalesforceOrgUi } from '@jetstream/types';
+import { CacheItemWithData, OrgCacheItem, QueryHistoryItem, SalesforceOrgUi } from '@jetstream/types';
 import { AxiosRequestConfig } from 'axios';
 import localforage from 'localforage';
 import isString from 'lodash/isString';
@@ -26,14 +26,14 @@ export async function clearCacheForOrg(org: SalesforceOrgUi) {
 
 export async function clearQueryHistoryForOrg(org: SalesforceOrgUi) {
   try {
-    const queryHistory = await localforage.getItem<MapOf<QueryHistoryItem>>(INDEXED_DB.KEYS.queryHistory);
+    const queryHistory = (await localforage.getItem<Record<string, QueryHistoryItem | undefined>>(INDEXED_DB.KEYS.queryHistory)) || {};
     for (const [key] of Object.entries(queryHistory)) {
       if (key.startsWith(org.uniqueId)) {
         queryHistory[key] = undefined;
       }
     }
     await localforage.setItem(INDEXED_DB.KEYS.queryHistory, JSON.parse(JSON.stringify(queryHistory)));
-    logger.log('[QUERY-HISTORY][REMOVED]', queryHistory);
+    logger.log('[QUERY-HISTORY][REMOVED]');
   } catch (ex) {
     logger.log('[QUERY-HISTORY][ERROR]', ex);
   }
@@ -53,12 +53,16 @@ export async function getCacheItemHttp<T>(
   useQueryParamsInCacheKey?: boolean,
   useBodyInCacheKey?: boolean
 ): Promise<CacheItemWithData<T> | null> {
-  const orgId = org?.uniqueId || 'unset';
-  const cacheKey = getCacheKeyForHttp(config, useQueryParamsInCacheKey, useBodyInCacheKey);
-  const cacheItem = await localforage.getItem<OrgCacheItem<T>>(`${INDEXED_DB.KEYS.httpCache}:${orgId}`);
-  const item = cacheItem && cacheItem[cacheKey];
-  if (item && !isExpired(item.exp)) {
-    return item;
+  try {
+    const orgId = org?.uniqueId || 'unset';
+    const cacheKey = getCacheKeyForHttp(config, useQueryParamsInCacheKey, useBodyInCacheKey);
+    const cacheItem = await localforage.getItem<OrgCacheItem<T>>(`${INDEXED_DB.KEYS.httpCache}:${orgId}`);
+    const item = cacheItem && cacheItem[cacheKey];
+    if (item && !isExpired(item.exp)) {
+      return item;
+    }
+  } catch (ex) {
+    logger.log('[HTTP][CACHE][ERROR]', ex);
   }
   return null;
 }
@@ -72,12 +76,16 @@ export async function getCacheItemHttp<T>(
  * @param useQueryParamsInCacheKey
  */
 export async function getCacheItemNonHttp<T>(org: SalesforceOrgUi, key: string): Promise<CacheItemWithData<T> | null> {
-  const orgId = org.uniqueId;
-  const cacheKey = getCacheKeyForNonHttp(key);
-  const cacheItem = await localforage.getItem<OrgCacheItem<T>>(`${INDEXED_DB.KEYS.httpCache}:${orgId}`);
-  const item = cacheItem && cacheItem[cacheKey];
-  if (item && !isExpired(item.exp)) {
-    return item;
+  try {
+    const orgId = org.uniqueId;
+    const cacheKey = getCacheKeyForNonHttp(key);
+    const cacheItem = await localforage.getItem<OrgCacheItem<T>>(`${INDEXED_DB.KEYS.httpCache}:${orgId}`);
+    const item = cacheItem && cacheItem[cacheKey];
+    if (item && !isExpired(item.exp)) {
+      return item;
+    }
+  } catch (ex) {
+    logger.log('[HTTP][CACHE][ERROR]', ex);
   }
   return null;
 }
@@ -95,7 +103,7 @@ export async function saveCacheItemHttp<T>(
   org?: SalesforceOrgUi,
   useQueryParamsInCacheKey?: boolean,
   useBodyInCacheKey?: boolean
-): Promise<CacheItemWithData<T>> {
+): Promise<CacheItemWithData<T> | undefined> {
   try {
     const orgId = org?.uniqueId || 'unset';
     let cacheItem = await localforage.getItem<OrgCacheItem<T>>(`${INDEXED_DB.KEYS.httpCache}:${orgId}`);
@@ -119,7 +127,7 @@ export async function saveCacheItemHttp<T>(
   }
 }
 
-export async function saveCacheItemNonHttp<T>(data: T, org: SalesforceOrgUi, key: string): Promise<CacheItemWithData<T>> {
+export async function saveCacheItemNonHttp<T>(data: T, org: SalesforceOrgUi, key: string): Promise<CacheItemWithData<T> | undefined> {
   try {
     const orgId = org?.uniqueId || 'unset';
     let cacheItem = await localforage.getItem<OrgCacheItem<T>>(`${INDEXED_DB.KEYS.httpCache}:${orgId}`);

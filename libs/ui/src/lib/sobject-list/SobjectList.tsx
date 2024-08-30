@@ -1,9 +1,8 @@
 import { css } from '@emotion/react';
 import { formatNumber, useNonInitialEffect } from '@jetstream/shared/ui-utils';
 import { multiWordObjectFilter } from '@jetstream/shared/utils';
-import { UpDown } from '@jetstream/types';
-import { DescribeGlobalSObjectResult } from 'jsforce';
-import { createRef, Fragment, FunctionComponent, useEffect, useState } from 'react';
+import { DescribeGlobalSObjectResult, Maybe, UpDown } from '@jetstream/types';
+import { Fragment, FunctionComponent, createRef, useEffect, useState } from 'react';
 import SearchInput from '../form/search-input/SearchInput';
 import EmptyState from '../illustrations/EmptyState';
 import AutoFullHeightContainer from '../layout/AutoFullHeightContainer';
@@ -12,10 +11,10 @@ import Spinner from '../widgets/Spinner';
 
 export interface SobjectListProps {
   isTooling?: boolean;
-  sobjects: DescribeGlobalSObjectResult[];
-  selectedSObject: DescribeGlobalSObjectResult;
+  sobjects: Maybe<DescribeGlobalSObjectResult[]>;
+  selectedSObject: Maybe<DescribeGlobalSObjectResult>;
   loading: boolean;
-  errorMessage?: string; // TODO:
+  errorMessage?: Maybe<string>;
   initialSearchTerm?: string;
   onSelected: (sobject: DescribeGlobalSObjectResult) => void;
   errorReattempt: () => void;
@@ -38,7 +37,7 @@ export const SobjectList: FunctionComponent<SobjectListProps> = ({
     if (sobjects && sobjects.length > 0 && searchTerm) {
       return sobjects.filter(multiWordObjectFilter(['name', 'label'], searchTerm));
     } else {
-      return sobjects;
+      return sobjects || [];
     }
   });
   const [searchInputId] = useState(`object-filter-${Date.now()}`);
@@ -48,7 +47,7 @@ export const SobjectList: FunctionComponent<SobjectListProps> = ({
     if (sobjects && sobjects.length > 0 && searchTerm) {
       setFilteredSobjects(sobjects.filter(multiWordObjectFilter(['name', 'label'], searchTerm)));
     } else {
-      setFilteredSobjects(sobjects);
+      setFilteredSobjects(sobjects || []);
     }
   }, [sobjects, searchTerm]);
 
@@ -106,7 +105,10 @@ export const SobjectList: FunctionComponent<SobjectListProps> = ({
                 autoScrollToFocus
                 items={filteredSobjects}
                 isActive={(item: DescribeGlobalSObjectResult) => item.name === selectedSObject?.name}
-                onSelected={(key) => onSelected(sobjects.find((item) => item.name === key))}
+                onSelected={(key) => {
+                  const selected = sobjects.find((item) => item.name === key);
+                  selected && onSelected(selected);
+                }}
                 getContent={(item: DescribeGlobalSObjectResult) => ({
                   key: item.name,
                   testId: item.name,
@@ -116,7 +118,7 @@ export const SobjectList: FunctionComponent<SobjectListProps> = ({
                 searchTerm={searchTerm}
                 highlightText
               />
-              {!filteredSobjects.length && (
+              {!loading && !filteredSobjects.length && (
                 <EmptyState headline="There are no matching objects" subHeading="Adjust your selection."></EmptyState>
               )}
             </AutoFullHeightContainer>

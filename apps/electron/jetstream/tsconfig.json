@@ -1,9 +1,0 @@
-{
-  "extends": "../../../tsconfig.base.json",
-  "compilerOptions": {
-    "allowSyntheticDefaultImports": true,
-    "types": ["node"]
-  },
-  "include": ["**/*.ts"],
-  "exclude": ["jest.config.ts"]
-}

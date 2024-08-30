@@ -1,18 +1,24 @@
 import { logger } from '@jetstream/shared/client-logger';
-import addSeconds from 'date-fns/addSeconds';
-import isAfter from 'date-fns/isAfter';
+import { Maybe } from '@jetstream/types';
+import { addSeconds } from 'date-fns/addSeconds';
+import { isAfter } from 'date-fns/isAfter';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getUseInjectScript } from './useInjectScript';
 import { useNonInitialEffect } from './useNonInitialEffect';
 import { useRollbar } from './useRollbar';
 
-const useInjectScriptGapi = getUseInjectScript('https://apis.google.com/js/api.js');
-const useInjectScriptGis = getUseInjectScript('https://accounts.google.com/gsi/client');
+let useInjectScriptGapi: () => [boolean, boolean] = () => [false, false];
+let useInjectScriptGis: () => [boolean, boolean] = () => [false, false];
+
+if (!globalThis.__IS_CHROME_EXTENSION__) {
+  useInjectScriptGapi = getUseInjectScript('https://apis.google.com/js/api.js');
+  useInjectScriptGis = getUseInjectScript('https://accounts.google.com/gsi/client');
+}
 
 let _apiLoaded = false;
-let _tokenClient: google.accounts.oauth2.TokenClient;
-let _tokenResponse: google.accounts.oauth2.TokenResponse;
-let _tokenExpiration: Date;
+let _tokenClient: Maybe<google.accounts.oauth2.TokenClient>;
+let _tokenResponse: Maybe<google.accounts.oauth2.TokenResponse>;
+let _tokenExpiration: Maybe<Date>;
 
 export const SCOPES = {
   'drive.file': 'https://www.googleapis.com/auth/drive.file',
@@ -31,17 +37,22 @@ export interface GoogleApiClientConfig {
  */
 export function useGoogleApi({ clientId, scopes = [SCOPES['drive.file']] }: GoogleApiClientConfig) {
   const rollbar = useRollbar();
-  const tokenClient = useRef<google.accounts.oauth2.TokenClient>(_tokenClient);
-  const tokenResponse = useRef<google.accounts.oauth2.TokenResponse>(_tokenResponse);
-  const tokenCallback = useRef<{
-    resolve: (value: google.accounts.oauth2.TokenResponse) => void;
-    reject: (reason?: any) => void;
-  }>();
-  const tokenExpiration = useRef<Date>(_tokenExpiration);
+  const tokenClient = useRef<Maybe<google.accounts.oauth2.TokenClient>>(_tokenClient);
+  const tokenResponse = useRef<Maybe<google.accounts.oauth2.TokenResponse>>(_tokenResponse);
+  const tokenCallback = useRef<
+    | {
+        resolve: (value: google.accounts.oauth2.TokenResponse) => void;
+        reject: (reason?: any) => void;
+      }
+    | null
+    | undefined
+  >();
+  const tokenExpiration = useRef<Maybe<Date>>(_tokenExpiration);
+  const [currentTokenExpiration, setCurrentTokenExpiration] = useState<Maybe<Date>>(tokenExpiration.current);
   const [gapiScriptLoaded, gapiScriptLoadError] = useInjectScriptGapi();
   const [gisScriptLoaded, gisScriptLoadError] = useInjectScriptGis();
   const [loading, setLoading] = useState(!_apiLoaded);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<string | null>(null);
   const [hasApisLoaded, setHasApisLoaded] = useState(() => _apiLoaded && !!gapi && !!google?.accounts?.oauth2);
 
   const scriptLoaded = gapiScriptLoaded && gisScriptLoaded;
@@ -70,6 +81,7 @@ export function useGoogleApi({ clientId, scopes = [SCOPES['drive.file']] }: Goog
     if (response.error !== undefined) {
       _tokenExpiration = null;
       tokenExpiration.current = _tokenExpiration;
+      setCurrentTokenExpiration(tokenExpiration.current);
       setError(response.error);
       if (tokenCallback.current) {
         tokenCallback.current.reject(response);
@@ -78,6 +90,7 @@ export function useGoogleApi({ clientId, scopes = [SCOPES['drive.file']] }: Goog
     } else {
       _tokenExpiration = addSeconds(new Date(), Number(response.expires_in));
       tokenExpiration.current = _tokenExpiration;
+      setCurrentTokenExpiration(tokenExpiration.current);
       setError(null);
       if (tokenCallback.current) {
         tokenCallback.current.resolve(response);
@@ -131,15 +144,15 @@ export function useGoogleApi({ clientId, scopes = [SCOPES['drive.file']] }: Goog
   }, [rollbar]);
 
   const isTokenValid = useCallback(() => {
-    return !!tokenClient.current && !!tokenResponse.current && !!tokenExpiration.current && isAfter(tokenExpiration.current, new Date());
-  }, []);
+    return !!tokenClient.current && !!tokenResponse.current && !!currentTokenExpiration && isAfter(currentTokenExpiration, new Date());
+  }, [currentTokenExpiration]);
 
   const getToken = useCallback(() => {
     return new Promise<google.accounts.oauth2.TokenResponse>((resolve, reject) => {
       if (tokenResponse.current && isTokenValid()) {
         return resolve(tokenResponse.current);
       }
-      tokenClient.current.requestAccessToken();
+      tokenClient.current?.requestAccessToken();
       tokenCallback.current = {
         resolve,
         reject,
@@ -149,15 +162,16 @@ export function useGoogleApi({ clientId, scopes = [SCOPES['drive.file']] }: Goog
   }, []);
 
   const revokeToken = useCallback(async () => {
-    if (tokenResponse.current !== null) {
+    if (tokenResponse.current && tokenResponse.current.access_token) {
       google.accounts.oauth2.revoke(tokenResponse.current.access_token, () => {
-        logger.log('Revoked: ' + tokenResponse.current.access_token);
+        logger.log('Revoked: ' + tokenResponse.current?.access_token);
       });
     }
     tokenResponse.current = null;
     _tokenResponse = tokenResponse.current;
     _tokenExpiration = null;
     tokenExpiration.current = _tokenExpiration;
+    setCurrentTokenExpiration(tokenExpiration.current);
   }, []);
 
   return {

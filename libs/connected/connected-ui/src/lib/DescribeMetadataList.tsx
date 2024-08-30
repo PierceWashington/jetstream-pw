@@ -1,7 +1,7 @@
 import { css } from '@emotion/react';
 import { formatNumber, useNonInitialEffect } from '@jetstream/shared/ui-utils';
 import { multiWordObjectFilter } from '@jetstream/shared/utils';
-import { MapOf, SalesforceOrgUi, UpDown } from '@jetstream/types';
+import { MetadataObject, SalesforceOrgUi, UpDown } from '@jetstream/types';
 import {
   AutoFullHeightContainer,
   Checkbox,
@@ -15,9 +15,8 @@ import {
   Spinner,
   Tooltip,
 } from '@jetstream/ui';
-import { MetadataObject } from 'jsforce';
-import { startCase } from 'lodash';
-import { createRef, Fragment, FunctionComponent, useEffect, useRef, useState } from 'react';
+import startCase from 'lodash/startCase';
+import { Fragment, FunctionComponent, createRef, useEffect, useRef, useState } from 'react';
 import { useDescribeMetadata } from './useDescribeMetadata';
 import { getMetadataLabelFromFullName } from './utils';
 
@@ -30,11 +29,11 @@ export interface DescribeMetadataListProps {
   inputLabelPlural: string;
   org: SalesforceOrgUi;
   initialItems: string[];
-  initialItemMap: MapOf<MetadataObject>;
+  initialItemMap: Record<string, MetadataObject>;
   selectedItems: Set<string>;
   omitRefresh?: boolean;
   onItems: (items: string[]) => void;
-  onItemsMap: (itemMap: MapOf<MetadataObject>) => void;
+  onItemsMap: (itemMap: Record<string, MetadataObject>) => void;
   onSelected: (items: string[], options?: { selectAllValue?: boolean; clearSelection?: boolean }) => void;
 }
 
@@ -49,7 +48,7 @@ export const DescribeMetadataList: FunctionComponent<DescribeMetadataListProps> 
   onItemsMap,
   onSelected,
 }) => {
-  const isMounted = useRef(null);
+  const isMounted = useRef(true);
   const [selectedItemsSet, setSelectedItemsSet] = useState<Set<string>>(new Set<string>(selectedItems || []));
   const [searchTerm, setSearchTerm] = useState('');
   const [searchInputId] = useState(`${inputLabelPlural}-filter-${Date.now()}`);
@@ -61,11 +60,11 @@ export const DescribeMetadataList: FunctionComponent<DescribeMetadataListProps> 
     initialItemMap
   );
 
-  const [itemsWithLabel, setItemsWithLabel] = useState<ItemWithLabel[]>(() =>
+  const [itemsWithLabel, setItemsWithLabel] = useState<ItemWithLabel[] | null>(() =>
     metadataItems ? metadataItems.map((name) => ({ name, label: getMetadataLabelFromFullName(name) })) : null
   );
-  const [filteredMetadataItems, setFilteredMetadataItems] = useState<ItemWithLabel[]>(() => {
-    if (itemsWithLabel?.length > 0 && searchTerm) {
+  const [filteredMetadataItems, setFilteredMetadataItems] = useState<ItemWithLabel[] | null | undefined>(() => {
+    if (itemsWithLabel && itemsWithLabel.length > 0 && searchTerm) {
       return itemsWithLabel.filter(multiWordObjectFilter(['name', 'label'], searchTerm));
     } else if (itemsWithLabel) {
       return itemsWithLabel;
@@ -155,7 +154,7 @@ export const DescribeMetadataList: FunctionComponent<DescribeMetadataListProps> 
             </button>
           </p>
         )}
-        {!loading && metadataItems && filteredMetadataItems && (
+        {!loading && !hasError && metadataItems && filteredMetadataItems && itemsWithLabel && (
           <Fragment>
             <div className="slds-p-bottom--xx-small">
               <SearchInput

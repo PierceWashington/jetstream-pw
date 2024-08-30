@@ -1,16 +1,17 @@
 import { DATE_FORMATS } from '@jetstream/shared/constants';
 import { logErrorToRollbar } from '@jetstream/shared/ui-utils';
-import formatDate from 'date-fns/format';
-import parseDate from 'date-fns/parse';
-import parseISO from 'date-fns/parseISO';
-import startOfDay from 'date-fns/startOfDay';
-import fileSizeFormatter from 'filesize';
+import { Maybe } from '@jetstream/types';
+import { formatDate } from 'date-fns/format';
+import { parse as parseDate } from 'date-fns/parse';
+import { parseISO } from 'date-fns/parseISO';
+import { startOfDay } from 'date-fns/startOfDay';
+import { filesize as fileSizeFormatter } from 'filesize';
 import isDate from 'lodash/isDate';
 import isNil from 'lodash/isNil';
 import isObject from 'lodash/isObject';
 import { SalesforceAddressField, SalesforceLocationField } from './data-table-types';
 
-export const dataTableDateFormatter = (dateOrDateTime: Date | string | null | undefined): string => {
+export const dataTableDateFormatter = (dateOrDateTime: Maybe<Date | string>): string | null => {
   try {
     if (!dateOrDateTime) {
       return null;
@@ -24,19 +25,23 @@ export const dataTableDateFormatter = (dateOrDateTime: Date | string | null | un
       return dateOrDateTime;
     }
   } catch (ex) {
-    logErrorToRollbar(ex.message, {
-      stack: ex.stack,
-      place: 'dataTableDateFormatter',
-      type: 'Error formatting date',
-      inputValue: dateOrDateTime,
-    });
+    logErrorToRollbar(
+      ex.message,
+      {
+        stack: ex.stack,
+        place: 'dataTableDateFormatter',
+        type: 'Error formatting date',
+        inputValue: dateOrDateTime,
+      },
+      'warn'
+    );
     return String(dateOrDateTime || '');
   }
 };
 
-export const dataTableTimeFormatter = (value: string | null | undefined): string => {
+export const dataTableTimeFormatter = (value: Maybe<string>): string | null => {
   try {
-    const time: string = value;
+    const time = value;
     if (!time) {
       return null;
     } else if (time.length === 13) {
@@ -45,36 +50,44 @@ export const dataTableTimeFormatter = (value: string | null | undefined): string
       return time;
     }
   } catch (ex) {
-    logErrorToRollbar(ex.message, {
-      stack: ex.stack,
-      place: 'dataTableDateFormatter',
-      type: 'Error formatting time',
-      inputValue: value,
-    });
+    logErrorToRollbar(
+      ex.message,
+      {
+        stack: ex.stack,
+        place: 'dataTableDateFormatter',
+        type: 'Error formatting time',
+        inputValue: value,
+      },
+      'warn'
+    );
     return String(value || '');
   }
 };
 
-export const dataTableFileSizeFormatter = (sizeInBytes: string | number | null | undefined): string => {
+export const dataTableFileSizeFormatter = (sizeInBytes: Maybe<string | number>): string | null => {
   if (isNil(sizeInBytes)) {
     return null;
   }
   try {
     return fileSizeFormatter(sizeInBytes as any);
   } catch (ex) {
-    logErrorToRollbar(ex.message, {
-      stack: ex.stack,
-      place: 'dataTableDateFormatter',
-      type: 'error formatting file size',
-      inputValue: sizeInBytes,
-    });
+    logErrorToRollbar(
+      ex.message,
+      {
+        stack: ex.stack,
+        place: 'dataTableDateFormatter',
+        type: 'error formatting file size',
+        inputValue: sizeInBytes,
+      },
+      'warn'
+    );
     return String(sizeInBytes || '');
   }
 };
 
 const newLineRegex = /\\n/g;
 
-export const dataTableAddressValueFormatter = (value: any): string => {
+export const dataTableAddressValueFormatter = (value: any): string | null => {
   try {
     if (!isObject(value)) {
       return null;
@@ -84,17 +97,21 @@ export const dataTableAddressValueFormatter = (value: any): string => {
     const remainingParts = [address.city, address.state, address.postalCode, address.country].filter((part) => !!part).join(', ');
     return [street, remainingParts].join('\n');
   } catch (ex) {
-    logErrorToRollbar(ex.message, {
-      stack: ex.stack,
-      place: 'dataTableDateFormatter',
-      type: 'error formatting address',
-      inputValue: value,
-    });
+    logErrorToRollbar(
+      ex.message,
+      {
+        stack: ex.stack,
+        place: 'dataTableDateFormatter',
+        type: 'error formatting address',
+        inputValue: value,
+      },
+      'warn'
+    );
     return String(value || '');
   }
 };
 
-export const dataTableLocationFormatter = (value: SalesforceLocationField | null | undefined): string => {
+export const dataTableLocationFormatter = (value: Maybe<SalesforceLocationField>): string | null => {
   try {
     if (!value || !isObject(value)) {
       return null;
@@ -102,12 +119,16 @@ export const dataTableLocationFormatter = (value: SalesforceLocationField | null
     const location: SalesforceLocationField = value as SalesforceLocationField;
     return `Latitude: ${location.latitude}°, Longitude: ${location.longitude}°`;
   } catch (ex) {
-    logErrorToRollbar(ex.message, {
-      stack: ex.stack,
-      place: 'dataTableDateFormatter',
-      type: 'error formatting location',
-      inputValue: value,
-    });
+    logErrorToRollbar(
+      ex.message,
+      {
+        stack: ex.stack,
+        place: 'dataTableDateFormatter',
+        type: 'error formatting location',
+        inputValue: value,
+      },
+      'warn'
+    );
     return String(value || '');
   }
 };

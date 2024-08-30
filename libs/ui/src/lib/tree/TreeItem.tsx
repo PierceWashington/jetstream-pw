@@ -1,5 +1,6 @@
+import { Maybe } from '@jetstream/types';
 import classNames from 'classnames';
-import { isString } from 'lodash';
+import isString from 'lodash/isString';
 import { SyntheticEvent } from 'react';
 import Icon from '../widgets/Icon';
 import { TreeItems } from './Tree';
@@ -7,7 +8,7 @@ import { TreeItems } from './Tree';
 export interface TreeItemProps {
   item: TreeItems;
   level: number;
-  selectedItem: string;
+  selectedItem?: Maybe<string>;
   expandedItems: Set<string>;
   onSelected: (item: TreeItems) => void;
 }

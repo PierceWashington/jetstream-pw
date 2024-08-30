@@ -1,19 +1,16 @@
+import { DropDownItem, Maybe, UserProfileUi } from '@jetstream/types';
 import Avatar from '@salesforce-ux/design-system/assets/images/profile_avatar_96.png';
-import { Fragment, FunctionComponent, ReactNode, Suspense } from 'react';
-import { DropDownItem, UserProfileUi } from '@jetstream/types';
+import { Fragment, FunctionComponent, ReactNode, Suspense, useState } from 'react';
 import DropDown from '../form/dropdown/DropDown';
-import classNames from 'classnames';
-import Grid from '../grid/Grid';
-import { css } from '@emotion/react';
 
 export interface HeaderProps {
-  userProfile: UserProfileUi;
+  userProfile: Maybe<UserProfileUi>;
   logo: string | ReactNode;
   orgs?: ReactNode;
   userMenuItems: DropDownItem[];
   rightHandMenuItems?: ReactNode;
   // notification?: ReactNode;
-  isElectron?: boolean;
+  isChromeExtension?: boolean;
   onUserMenuItemSelected: (id: string) => void;
   children?: React.ReactNode;
 }
@@ -24,44 +21,24 @@ export const Header: FunctionComponent<HeaderProps> = ({
   orgs,
   rightHandMenuItems,
   userMenuItems,
-  isElectron,
+  isChromeExtension,
   onUserMenuItemSelected,
   children,
 }) => {
-  if (!isElectron) {
-    return (
-      <header className="slds-global-header_container branding-header slds-no-print">
-        <div className="slds-global-header slds-grid slds-grid_align-spread">
-          <HeaderContent
-            userProfile={userProfile}
-            logo={logo}
-            orgs={orgs}
-            rightHandMenuItems={rightHandMenuItems}
-            userMenuItems={userMenuItems}
-            onUserMenuItemSelected={onUserMenuItemSelected}
-          />
-        </div>
-        {children}
-      </header>
-    );
-  }
-
   return (
-    <header className="">
-      <div className="global-titlebar draggable">
-        <Grid align="spread" verticalAlign="center" className="titlebar draggable">
-          <HeaderContent
-            userProfile={userProfile}
-            logo={logo}
-            orgs={orgs}
-            rightHandMenuItems={rightHandMenuItems}
-            userMenuItems={userMenuItems}
-            isElectron={isElectron}
-            onUserMenuItemSelected={onUserMenuItemSelected}
-          />
-        </Grid>
+    <header className="slds-global-header_container branding-header slds-no-print">
+      <div className="slds-global-header slds-grid slds-grid_align-spread">
+        <HeaderContent
+          userProfile={userProfile}
+          logo={logo}
+          orgs={orgs}
+          rightHandMenuItems={rightHandMenuItems}
+          userMenuItems={userMenuItems}
+          isChromeExtension={isChromeExtension}
+          onUserMenuItemSelected={onUserMenuItemSelected}
+        />
       </div>
-      <div className="electron-navbar">{children}</div>
+      {children}
     </header>
   );
 };
@@ -72,28 +49,17 @@ const HeaderContent: FunctionComponent<Omit<HeaderProps, 'children'>> = ({
   orgs,
   rightHandMenuItems,
   userMenuItems,
-  isElectron,
+  isChromeExtension,
   onUserMenuItemSelected,
 }) => {
+  const [avatarSrc, setAvatarSrc] = useState(userProfile?.picture || Avatar);
+
   return (
     <Fragment>
       {/* LOGO */}
-      {isElectron ? (
-        <div className="slds-global-header__item draggable">
-          <div
-            css={css`
-              height: 2.5rem;
-            `}
-            className="draggable"
-          >
-            {logo}
-          </div>
-        </div>
-      ) : (
-        <div className="slds-global-header__item draggable">
-          <div className="slds-global-header__logo draggable" style={{ backgroundImage: `url(${logo})` }}></div>
-        </div>
-      )}
+      <div className="slds-global-header__item draggable">
+        <div className="slds-global-header__logo draggable" style={{ backgroundImage: `url(${logo})` }}></div>
+      </div>
       {/* ORGS */}
       {orgs && (
         <Suspense fallback={<div>Loading...</div>}>
@@ -112,22 +78,24 @@ const HeaderContent: FunctionComponent<Omit<HeaderProps, 'children'>> = ({
           ) : (
             <li className="slds-global-actions__item non-draggable">{rightHandMenuItems}</li>
           )}
-          <li className="slds-global-actions__item non-draggable">
-            <div className="slds-dropdown-trigger slds-dropdown-trigger_click">
-              <DropDown
-                buttonClassName="slds-button slds-global-actions__avatar slds-global-actions__item-action"
-                buttonContent={
-                  <span className="slds-avatar slds-avatar_circle slds-avatar_medium">
-                    <img alt="Avatar" src={userProfile?.picture || Avatar} />
-                  </span>
-                }
-                position="right"
-                actionText="view user options"
-                items={userMenuItems}
-                onSelected={onUserMenuItemSelected}
-              />
-            </div>
-          </li>
+          {!isChromeExtension && (
+            <li className="slds-global-actions__item non-draggable">
+              <div className="slds-dropdown-trigger slds-dropdown-trigger_click">
+                <DropDown
+                  buttonClassName="slds-button slds-global-actions__avatar slds-global-actions__item-action"
+                  buttonContent={
+                    <span className="slds-avatar slds-avatar_circle slds-avatar_medium">
+                      <img loading="lazy" alt="Avatar" src={avatarSrc} onError={(err) => setAvatarSrc(Avatar)} />
+                    </span>
+                  }
+                  position="right"
+                  actionText="view user options"
+                  items={userMenuItems}
+                  onSelected={onUserMenuItemSelected}
+                />
+              </div>
+            </li>
+          )}
         </ul>
       </div>
     </Fragment>

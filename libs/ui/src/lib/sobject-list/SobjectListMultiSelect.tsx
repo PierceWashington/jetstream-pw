@@ -1,9 +1,8 @@
 import { css } from '@emotion/react';
 import { formatNumber } from '@jetstream/shared/ui-utils';
-import { multiWordObjectFilter, orderStringsBy } from '@jetstream/shared/utils';
-import { UpDown } from '@jetstream/types';
-import { DescribeGlobalSObjectResult } from 'jsforce';
-import { createRef, Fragment, FunctionComponent, useEffect, useState } from 'react';
+import { multiWordObjectFilter, orderValues } from '@jetstream/shared/utils';
+import { DescribeGlobalSObjectResult, Maybe, UpDown } from '@jetstream/types';
+import { Fragment, FunctionComponent, createRef, useEffect, useState } from 'react';
 import Checkbox from '../form/checkbox/Checkbox';
 import SearchInput from '../form/search-input/SearchInput';
 import EmptyState from '../illustrations/EmptyState';
@@ -13,12 +12,12 @@ import ItemSelectionSummary from '../widgets/ItemSelectionSummary';
 import Spinner from '../widgets/Spinner';
 
 export interface SobjectListMultiSelectProps {
-  sobjects: DescribeGlobalSObjectResult[];
+  sobjects: Maybe<DescribeGlobalSObjectResult[]>;
   selectedSObjects: string[];
   allowSelectAll?: boolean;
   disabled?: boolean;
   loading: boolean;
-  errorMessage?: string; // TODO:
+  errorMessage?: Maybe<string>;
   onSelected: (selectedSObjects: string[]) => void;
   onFilterParamsUpdated?: (filterParams: { editableOnly: boolean }) => void;
   errorReattempt: () => void;
@@ -37,8 +36,8 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
 }) => {
   const [editableOnly, setEditableOnly] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [filteredSobjects, setFilteredSobjects] = useState<DescribeGlobalSObjectResult[]>(() => {
-    if (sobjects?.length > 0 && searchTerm) {
+  const [filteredSobjects, setFilteredSobjects] = useState<Maybe<DescribeGlobalSObjectResult[]>>(() => {
+    if (sobjects && sobjects?.length > 0 && searchTerm) {
       return sobjects.filter(multiWordObjectFilter(['name', 'label'], searchTerm));
     } else {
       return sobjects;
@@ -71,19 +70,19 @@ export const SobjectListMultiSelect: FunctionComponent<SobjectListMultiSelectPro
       selectedSObjectSet.delete(sobjectName);
       onSelected(Array.from(selectedSObjectSet));
     } else {
-      onSelected(orderStringsBy(Array.from(selectedSObjectSet).concat(sobjectName)));
+      onSelected(orderValues(Array.from(selectedSObjectSet).concat(sobjectName)));
     }
   }
 
   function handleSelectAll(value: boolean) {
-    filteredSobjects.forEach((item) => {
+    filteredSobjects?.forEach((item) => {
       if (value) {
         selectedSObjectSet.add(item.name);
       } else {
         selectedSObjectSet.delete(item.name);
       }
     });
-    onSelected(orderStringsBy(Array.from(selectedSObjectSet)));
+    onSelected(orderValues(Array.from(selectedSObjectSet)));
   }
 
   function handleEditableOnly(value: boolean) {

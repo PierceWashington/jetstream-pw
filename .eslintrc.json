@@ -10,9 +10,20 @@
     "@nrwl/nx/enforce-module-boundaries": [
       "error",
       {
-        "enforceBuildableLibDependency": true,
         "allow": [],
         "depConstraints": [
+          {
+            "sourceTag": "scope:server",
+            "onlyDependOnLibsWithTags": ["scope:server", "scope:type-only", "scope:any"]
+          },
+          {
+            "sourceTag": "scope:worker",
+            "onlyDependOnLibsWithTags": ["scope:allow-worker-import", "scope:type-only", "scope:any"]
+          },
+          {
+            "sourceTag": "scope:allow-worker-import",
+            "onlyDependOnLibsWithTags": ["scope:allow-worker-import", "scope:type-only", "scope:any"]
+          },
           {
             "sourceTag": "*",
             "onlyDependOnLibsWithTags": ["*"]
@@ -25,32 +36,22 @@
   "overrides": [
     {
       "files": ["*.ts", "*.tsx", "*.js", "*.jsx"],
-      "rules": {
-        "@nrwl/nx/enforce-module-boundaries": [
-          "error",
-          {
-            "enforceBuildableLibDependency": true,
-            "allow": [],
-            "depConstraints": [
-              {
-                "sourceTag": "*",
-                "onlyDependOnLibsWithTags": ["*"]
-              }
-            ]
-          }
-        ]
-      }
+      "rules": {}
     },
     {
       "files": ["*.tsx"],
       "rules": {
-        "@typescript-eslint/no-unused-vars": "off"
+        "@typescript-eslint/no-explicit-any": "warn",
+        "@typescript-eslint/no-unused-vars": "warn"
       }
     },
     {
       "files": ["*.ts", "*.tsx"],
       "extends": ["plugin:@nrwl/nx/typescript"],
-      "rules": {}
+      "rules": {
+        "@typescript-eslint/no-explicit-any": "warn",
+        "@typescript-eslint/no-unused-vars": "warn"
+      }
     },
     {
       "files": ["*.js", "*.jsx"],

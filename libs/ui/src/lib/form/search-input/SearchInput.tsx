@@ -10,7 +10,10 @@ export interface SearchInputProps {
   className?: string;
   placeholder?: string;
   autoFocus?: boolean;
-  // this can generally be omitted, but can be used to control the value
+  /**
+   * Optional value to control the input externally
+   * Normally this can be omitted and the component will manage its own state
+   */
   value?: string;
   disabled?: boolean;
   onChange: (value: string) => void;
@@ -31,7 +34,7 @@ export const SearchInput: FunctionComponent<SearchInputProps> = ({
 }) => {
   const [value, setValue] = useState<string>(incomingValue || '');
   const debouncedFilters = useDebounce(value);
-  const inputEl = useRef<HTMLInputElement>();
+  const inputEl = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (incomingValue !== value) {
@@ -41,10 +44,8 @@ export const SearchInput: FunctionComponent<SearchInputProps> = ({
   }, [incomingValue]);
 
   useEffect(() => {
-    if (autoFocus && inputEl.current) {
-      inputEl.current.focus();
-    }
-  }, [inputEl]);
+    autoFocus && inputEl.current?.focus();
+  }, [autoFocus]);
 
   useNonInitialEffect(() => {
     onChange(debouncedFilters || '');
@@ -52,7 +53,7 @@ export const SearchInput: FunctionComponent<SearchInputProps> = ({
 
   function handleKeyUp(event: KeyboardEvent<HTMLInputElement>) {
     if (onArrowKeyUpDown) {
-      let direction: UpDown;
+      let direction: UpDown | undefined = undefined;
       if (isArrowUpKey(event)) {
         direction = 'UP';
       } else if (isArrowDownKey(event)) {

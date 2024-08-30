@@ -15,20 +15,19 @@ import {
 } from '@jetstream/shared/ui-utils';
 import { PreviousNext } from '@jetstream/types';
 import classNames from 'classnames';
-import { lastDayOfMonth } from 'date-fns';
-import addDays from 'date-fns/addDays';
-import addWeeks from 'date-fns/addWeeks';
-import endOfMonth from 'date-fns/endOfMonth';
-import isAfter from 'date-fns/isAfter';
-import isBefore from 'date-fns/isBefore';
-import isSameDay from 'date-fns/isSameDay';
-import isSameMonth from 'date-fns/isSameMonth';
-import setDay from 'date-fns/setDay';
-import setMonth from 'date-fns/setMonth';
-import setYear from 'date-fns/setYear';
-import startOfMonth from 'date-fns/startOfMonth';
+import { addDays } from 'date-fns/addDays';
+import { addWeeks } from 'date-fns/addWeeks';
+import { endOfMonth } from 'date-fns/endOfMonth';
+import { isAfter } from 'date-fns/isAfter';
+import { isBefore } from 'date-fns/isBefore';
+import { isSameDay } from 'date-fns/isSameDay';
+import { isSameMonth } from 'date-fns/isSameMonth';
+import { setDay } from 'date-fns/setDay';
+import { setMonth } from 'date-fns/setMonth';
+import { setYear } from 'date-fns/setYear';
+import { startOfMonth } from 'date-fns/startOfMonth';
 import isNumber from 'lodash/isNumber';
-import { createRef, FunctionComponent, KeyboardEvent, RefObject, useEffect, useRef, useState } from 'react';
+import { FunctionComponent, KeyboardEvent, RefObject, createRef, useEffect, useRef, useState } from 'react';
 
 interface DateGridDate {
   label: number;
@@ -39,6 +38,44 @@ interface DateGridDate {
   isSelected: boolean;
 }
 
+interface DateGridSelection {
+  selectedIdx: { week: number; day: number } | undefined;
+  todayIdx: { week: number; day: number } | undefined;
+  firstOfMonthIdx: { week: number; day: number } | undefined;
+  lastOfMonthIdx: { week: number; day: number } | undefined;
+}
+
+function getSelectedDates(dateGrid: DateGridDate[][]): DateGridSelection {
+  const selection: DateGridSelection = {
+    selectedIdx: undefined,
+    todayIdx: undefined,
+    firstOfMonthIdx: undefined,
+    lastOfMonthIdx: undefined,
+  };
+  let lastDayOfMonth: Date | undefined = undefined;
+  dateGrid.forEach((week, i) => {
+    week.forEach((day, k) => {
+      if (day.isCurrMonth) {
+        if (!lastDayOfMonth) {
+          lastDayOfMonth = endOfMonth(day.value);
+        }
+        if (day.isToday) {
+          selection.todayIdx = { week: i, day: k };
+        }
+        if (day.value.getDate() === 1) {
+          selection.firstOfMonthIdx = { week: i, day: k };
+        } else if (isSameDay(day.value, lastDayOfMonth)) {
+          selection.lastOfMonthIdx = { week: i, day: k };
+        }
+        if (day.isSelected) {
+          selection.selectedIdx = { week: i, day: k };
+        }
+      }
+    });
+  });
+  return selection;
+}
+
 export interface DateGridProps {
   minYear: number;
   maxYear: number;
@@ -47,7 +84,7 @@ export interface DateGridProps {
   currMonth: number;
   currYear: number;
   selectedDate?: Date;
-  cameFromMonth: PreviousNext;
+  cameFromMonth: PreviousNext | null;
 
   onClose: () => void;
   onSelected: (date: Date) => void;
@@ -94,49 +131,25 @@ export const DateGrid: FunctionComponent<DateGridProps> = ({
   useEffect(() => {
     try {
       if (dateGrid && elRefs.current && elRefs.current.length > 0) {
-        let selectedIdx: { week: number; day: number };
-        let todayIdx: { week: number; day: number };
-        let firstOfMonthIdx: { week: number; day: number };
-        let lastOfMonthIdx: { week: number; day: number };
-        let lastDayOfMonth;
-        dateGrid.forEach((week, i) => {
-          week.forEach((day, k) => {
-            if (day.isCurrMonth) {
-              if (!lastDayOfMonth) {
-                lastDayOfMonth = endOfMonth(day.value);
-              }
-              if (day.isToday) {
-                todayIdx = { week: i, day: k };
-              }
-              if (day.value.getDate() === 1) {
-                firstOfMonthIdx = { week: i, day: k };
-              } else if (isSameDay(day.value, lastDayOfMonth)) {
-                lastOfMonthIdx = { week: i, day: k };
-              }
-              if (day.isSelected) {
-                selectedIdx = { week: i, day: k };
-              }
-            }
-          });
-        });
+        const { firstOfMonthIdx, lastOfMonthIdx, selectedIdx, todayIdx } = getSelectedDates(dateGrid);
         if (cameFromMonth === 'PREVIOUS' && firstOfMonthIdx) {
-          elRefs.current[firstOfMonthIdx.week][firstOfMonthIdx.day].current.focus();
+          elRefs.current?.[firstOfMonthIdx.week]?.[firstOfMonthIdx.day]?.current?.focus();
         } else if (cameFromMonth === 'NEXT' && lastOfMonthIdx) {
-          elRefs.current[lastOfMonthIdx.week][lastOfMonthIdx.day].current.focus();
+          elRefs.current?.[lastOfMonthIdx.week]?.[lastOfMonthIdx.day]?.current?.focus();
         } else {
           if (selectedIdx) {
-            elRefs.current[selectedIdx.week][selectedIdx.day].current.focus();
+            elRefs.current?.[selectedIdx.week]?.[selectedIdx.day]?.current?.focus();
           } else if (todayIdx) {
-            elRefs.current[todayIdx.week][todayIdx.day].current.focus();
+            elRefs.current?.[todayIdx.week]?.[todayIdx.day]?.current?.focus();
           } else if (firstOfMonthIdx) {
-            elRefs.current[firstOfMonthIdx.week][firstOfMonthIdx.day].current.focus();
+            elRefs.current?.[firstOfMonthIdx.week]?.[firstOfMonthIdx.day]?.current?.focus();
           }
         }
       }
     } catch (ex) {
       // silent failure
     }
-  }, [dateGrid, elRefs.current]);
+  }, [cameFromMonth, dateGrid]);
 
   // Calculate date grid for a 5 week period
   useEffect(() => {
@@ -181,7 +194,7 @@ export const DateGrid: FunctionComponent<DateGridProps> = ({
         readOnly,
         isCurrMonth: currDate.getMonth() === currMonth,
         isToday: isSameDay(currDate, today),
-        isSelected: selectedDate && isSameDay(currDate, selectedDate),
+        isSelected: !!selectedDate && isSameDay(currDate, selectedDate),
       });
       currDate = addDays(currDate, 1);
     }
@@ -271,7 +284,7 @@ export const DateGrid: FunctionComponent<DateGridProps> = ({
       const newDay = dateGrid[targetWeekIdx][targetDayIdx].value;
       // if day is in different month, then change months
       if (isSameMonth(newDay, day.value)) {
-        currentRefs[targetWeekIdx][targetDayIdx].current.focus();
+        currentRefs[targetWeekIdx]?.[targetDayIdx]?.current?.focus();
       } else if (isBefore(newDay, day.value)) {
         onPrevMonth();
       } else {

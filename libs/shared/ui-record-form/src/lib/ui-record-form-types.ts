@@ -1,5 +1,4 @@
-import { ListItem, PicklistFieldValueItem } from '@jetstream/types';
-import { Field } from 'jsforce';
+import { Field, ListItem, PicklistFieldValueItem } from '@jetstream/types';
 
 export type EditableFields =
   | EditableFieldInput
@@ -14,7 +13,7 @@ export interface EditableField {
   type: 'input' | 'textarea' | 'picklist' | 'date' | 'datetime' | 'time' | 'checkbox';
   label: string;
   name: string;
-  labelHelpText?: string;
+  labelHelpText?: string | null;
   inputHelpText: string;
   required: boolean;
   readOnly: boolean;

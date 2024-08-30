@@ -6,16 +6,8 @@
   "generators": {},
   "targets": {
     "lint": {
-      "executor": "@nrwl/linter:eslint",
-      "options": {
-        "lintFilePatterns": [
-          "libs/icon-factory/**/*.js",
-          "libs/icon-factory/**/*.jsx",
-          "libs/icon-factory/**/*.ts",
-          "libs/icon-factory/**/*.tsx"
-        ]
-      }
+      "executor": "@nx/eslint:lint"
     }
   },
-  "tags": []
+  "tags": ["scope:shared"]
 }

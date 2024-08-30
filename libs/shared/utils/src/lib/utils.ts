@@ -1,4 +1,3 @@
-import { QueryResults, QueryResultsColumn } from '@jetstream/api-interfaces';
 import { DATE_FORMATS } from '@jetstream/shared/constants';
 import {
   BulkJob,
@@ -7,19 +6,54 @@ import {
   BulkJobUntyped,
   HttpMethod,
   InsertUpdateUpsertDelete,
-  MapOf,
+  ListItem,
+  ListItemGroup,
+  Maybe,
+  QueryColumnMetadata,
   QueryFieldWithPolymorphic,
-  Record,
+  QueryResult,
+  QueryResults,
+  QueryResultsColumn,
+  SalesforceRecord,
   SoapNil,
+  FieldType as jetstreamFieldType,
 } from '@jetstream/types';
+import { ComposeFieldTypeof, FieldSubquery, FieldType, getField } from '@jetstreamapp/soql-parser-js';
 import { formatISO as formatISODate, parse as parseDate, parseISO as parseISODate, startOfDay as startOfDayDate } from 'date-fns';
-import fromUnixTime from 'date-fns/fromUnixTime';
-import { FieldType as jsforceFieldType, QueryResult } from 'jsforce';
-import { get as lodashGet, inRange, isBoolean, isNil, isNumber, isObject, isString, orderBy } from 'lodash';
-import { ComposeFieldTypeof, FieldSubquery, FieldType, getField } from 'soql-parser-js';
+import { fromUnixTime } from 'date-fns/fromUnixTime';
+import { isMatch } from 'date-fns/isMatch';
+import lodashGet from 'lodash/get';
+import isBoolean from 'lodash/isBoolean';
+import isNil from 'lodash/isNil';
+import isNumber from 'lodash/isNumber';
+import isObject from 'lodash/isObject';
+import isString from 'lodash/isString';
+import orderBy from 'lodash/orderBy';
 import { REGEX } from './regex';
 
+// eslint-disable-next-line @typescript-eslint/no-empty-function
 export function NOOP() {}
+
+export function getErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return JSON.stringify(error);
+}
+
+export function getErrorStack(error: unknown) {
+  if (error instanceof Error) {
+    return error.stack;
+  }
+  return null;
+}
+
+export function getErrorMessageAndStackObj(error: unknown) {
+  if (error instanceof Error) {
+    return { message: error.message, stack: error.stack };
+  }
+  return {};
+}
 
 export function dateFromTimestamp(timestamp: number): Date {
   return fromUnixTime(timestamp);
@@ -87,7 +121,7 @@ export function multiWordObjectFilter<T>(
       .map((prop) => (item[prop] ?? '').toString())
       .join()
       .toLocaleLowerCase();
-    return search.every((word) => normalizedValue.includes(word)) || optionalExtraCondition?.(item);
+    return search.every((word) => normalizedValue.includes(word)) || optionalExtraCondition?.(item) || false;
   };
 }
 
@@ -102,7 +136,11 @@ export function multiWordStringFilter(value: string): (value: string, index: num
   };
 }
 
-export function orderObjectsBy<T>(items: T[], fields: keyof T | [keyof T], order: 'asc' | 'desc' | ('asc' | 'desc')[] = 'asc'): T[] {
+/**
+ * Order objects by the value of a field or multiple fields
+ * Strings are sorted in a case-insensitive manner
+ */
+export function orderObjectsBy<T>(items: T[], fields: keyof T | Array<keyof T>, order: 'asc' | 'desc' | ('asc' | 'desc')[] = 'asc'): T[] {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   fields = Array.isArray(fields) ? fields : [fields];
   order = Array.isArray(order) ? order : [order];
@@ -110,13 +148,20 @@ export function orderObjectsBy<T>(items: T[], fields: keyof T | [keyof T], order
   return orderBy(items, orderByItereeFn, order);
 }
 
-export function orderStringsBy(items: string[], order: 'asc' | 'desc' = 'asc'): string[] {
+/**
+ * Case-insensitive string sort in ascending or descending order
+ */
+export function orderValues<T extends number | string | boolean>(items: T[], order: 'asc' | 'desc' = 'asc'): T[] {
   const orderByItereeFn = (value) => (isString(value) ? value.toLowerCase() : value);
   return orderBy(items, [orderByItereeFn], [order]);
 }
 
-export function getMapOf<T>(items: T[], prop: keyof T): MapOf<T> {
-  return items.reduce((output: MapOf<T>, item) => {
+/**
+ * Group objects by a field and return a map of key to array of objects
+ * If there are multiple objects with the same key, the last item in list will win.
+ */
+export function groupByFlat<T>(items: T[], prop: keyof T): Record<string, T> {
+  return items.reduce((output: Record<string, T>, item) => {
     output[item[prop] as any] = item;
     return output;
   }, {});
@@ -129,15 +174,15 @@ export function getMapFromObj<T>(items: T[], prop: keyof T): Map<string, T> {
   }, new Map());
 }
 
-export function populateFromMapOf<T>(mapOf: MapOf<T>, items: string[]): T[] {
+export function populateFromMapOf<T>(mapOf: Record<string, T>, items: string[]): T[] {
   return items.map((item) => mapOf[item]).filter((item) => !!item);
 }
 
-export function flattenRecords(records: Record[], fields: string[]): MapOf<string>[] {
+export function flattenRecords(records: SalesforceRecord[], fields: string[]): Record<string, string>[] {
   return records.map((record) => flattenRecord(record, fields));
 }
 
-export function flattenRecord(record: Record, fields: string[], flattObjects = true): MapOf<string> {
+export function flattenRecord(record: SalesforceRecord, fields: string[], flattObjects = true): Record<string, string> {
   return fields.reduce((obj, field) => {
     const value = lodashGet(record, field);
     if (isObject(value) && flattObjects) {
@@ -161,8 +206,8 @@ export function splitArrayToMaxSize<T = unknown>(items: T[], maxSize: number): T
   if (!items || items.length === 0) {
     return [[]];
   }
-  let output = [];
-  let currSet = [];
+  const output: T[][] = [];
+  let currSet: T[] = [];
   items.forEach((item) => {
     if (currSet.length < maxSize) {
       currSet.push(item);
@@ -177,7 +222,7 @@ export function splitArrayToMaxSize<T = unknown>(items: T[], maxSize: number): T
   return output;
 }
 
-export function toBoolean(value: boolean | string | null | undefined, defaultValue: boolean = false) {
+export function toBoolean(value: Maybe<unknown>, defaultValue = false) {
   if (isBoolean(value)) {
     return value;
   }
@@ -187,7 +232,7 @@ export function toBoolean(value: boolean | string | null | undefined, defaultVal
   return defaultValue;
 }
 
-export function toNumber(value: number | string | null | undefined) {
+export function toNumber(value: Maybe<unknown>) {
   if (isString(value)) {
     const val = Number.parseInt(value);
     if (Number.isFinite(val)) {
@@ -197,21 +242,21 @@ export function toNumber(value: number | string | null | undefined) {
   return value;
 }
 
-export function truncate(value: string, maxLength: number, trailingChar: string = '...'): string {
+export function truncate(value: string, maxLength: number, trailingChar = '...'): string {
   if (!value || value.length <= maxLength) {
     return value;
   }
   return `${value.substring(0, maxLength)}${trailingChar}`;
 }
 
-export function pluralizeIfMultiple(value: string, items: any[], plural: string = 's'): string {
+export function pluralizeIfMultiple(value: string, items: any[], plural = 's'): string {
   if (!items || items.length !== 1) {
     return `${value}${plural}`;
   }
   return value;
 }
 
-export function pluralizeFromNumber(value: string, num: number, plural: string = 's'): string {
+export function pluralizeFromNumber(value: string, num = 0, plural = 's'): string {
   if (num !== 1) {
     return `${value}${plural}`;
   }
@@ -219,18 +264,41 @@ export function pluralizeFromNumber(value: string, num: number, plural: string =
 }
 
 export function getIdAndObjFromRecordUrl(url: string): [string, string] {
-  const [id, sobject] = url.split('/').reverse();
+  const [id, sobject] = url?.split('/').reverse() || [];
   return [id, sobject];
 }
 
 export function getSObjectFromRecordUrl(url: string): string {
-  const [id, sobject] = getIdAndObjFromRecordUrl(url);
+  const [_, sobject] = getIdAndObjFromRecordUrl(url);
   return sobject;
 }
 
 export function getIdFromRecordUrl(url: string): string {
-  const [id, sobject] = getIdAndObjFromRecordUrl(url);
+  const [id] = getIdAndObjFromRecordUrl(url);
   return id;
+}
+
+/**
+ * Convert empty strings to null
+ * Optionally trim all strings as well
+ */
+export function nullifyEmptyStrings<T extends Record<string, unknown>>(value: T, trimStrings = true): T {
+  if (!value) {
+    return value;
+  }
+  return Object.keys(value).reduce((obj, key) => {
+    obj[key] = value[key];
+    if (trimStrings && isString(obj[key])) {
+      obj[key] = (obj[key] as string).trim();
+    }
+    if (obj[key] === '') {
+      obj[key] = null;
+    }
+    if (isObject(obj[key])) {
+      obj[key] = nullifyEmptyStrings(obj[key] as Record<string, unknown>, trimStrings) as unknown;
+    }
+    return obj;
+  }, {}) as T;
 }
 
 /**
@@ -242,7 +310,7 @@ export function replaceSubqueryQueryResultsWithRecords(results: QueryResults<any
   if (results.parsedQuery) {
     const subqueryFields = new Set<string>(
       results.parsedQuery.fields
-        .filter((field) => field.type === 'FieldSubquery')
+        ?.filter((field) => field.type === 'FieldSubquery')
         .map((field: FieldSubquery) => field.subquery.relationshipName)
     );
     if (subqueryFields.size > 0) {
@@ -263,6 +331,9 @@ export function replaceSubqueryQueryResultsWithRecords(results: QueryResults<any
 }
 
 export function queryResultColumnToTypeLabel(column: QueryResultsColumn, fallback = 'Unknown'): string {
+  if (!column) {
+    return fallback;
+  }
   if (column.textType) {
     return 'Text';
   }
@@ -301,21 +372,30 @@ function getTypeOfField(polymorphicItems: { field: string; sobject: string; fiel
 }
 
 export function getRecordIdFromAttributes(record: any) {
+  if (!record?.attributes?.url) {
+    return '';
+  }
   return record.attributes.url.substring(record.attributes.url.lastIndexOf('/') + 1);
 }
 
 export function getSObjectNameFromAttributes(record: any) {
-  let urlWithoutId = record.attributes.url.substring(0, record.attributes.url.lastIndexOf('/'));
+  if (!record?.attributes?.type && !record?.attributes?.url) {
+    return '';
+  }
+  const urlWithoutId = record.attributes.type || record.attributes.url.substring(0, record.attributes.url.lastIndexOf('/'));
   return urlWithoutId.substring(urlWithoutId.lastIndexOf('/') + 1);
 }
 
-export function convertFieldWithPolymorphicToQueryFields(inputFields: QueryFieldWithPolymorphic[]): FieldType[] {
+export function convertFieldWithPolymorphicToQueryFields(
+  inputFields: QueryFieldWithPolymorphic[],
+  filterFns: Record<string, { fn: string; alias: string | null }> = {}
+): FieldType[] {
   let polymorphicItems: { field: string; sobject: string; fields: string[] } = {
-    field: null,
-    sobject: null,
+    field: '',
+    sobject: '',
     fields: [],
   };
-  let outputFields = inputFields.reduce((output: FieldType[], field) => {
+  const outputFields = inputFields.reduce((output: FieldType[], field) => {
     if (field.polymorphicObj) {
       const polymorphicField = field.field.substring(0, field.field.lastIndexOf('.'));
       const sobjectField = field.field.substring(field.field.lastIndexOf('.') + 1);
@@ -342,10 +422,21 @@ export function convertFieldWithPolymorphicToQueryFields(inputFields: QueryField
       // Compose prior polymorphic fields
       if (polymorphicItems.field && polymorphicItems.fields.length > 0) {
         output.push(getTypeOfField(polymorphicItems));
-        polymorphicItems = { field: null, sobject: null, fields: [] };
+        polymorphicItems = { field: '', sobject: '', fields: [] };
       }
-      // return regular non-TYPEOF fields
-      output.push(getField(field.field));
+      if (filterFns[field.field]?.fn) {
+        // return FieldFunctionExpression
+        output.push(
+          getField({
+            functionName: filterFns[field.field].fn,
+            alias: filterFns[field.field].alias || undefined,
+            parameters: [field.field],
+          })
+        );
+      } else {
+        // return regular non-TYPEOF fields
+        output.push(getField(field.field));
+      }
     }
     return output;
   }, []);
@@ -353,13 +444,13 @@ export function convertFieldWithPolymorphicToQueryFields(inputFields: QueryField
   // Compose remaining polymorphic fields
   if (polymorphicItems.field && polymorphicItems.fields.length > 0) {
     outputFields.push(getTypeOfField(polymorphicItems));
-    polymorphicItems = { field: null, sobject: null, fields: [] };
+    polymorphicItems = { field: '', sobject: '', fields: [] };
   }
 
   return outputFields;
 }
 
-export function ensureBoolean(value: string | boolean | null | undefined) {
+export function ensureBoolean(value: Maybe<string | boolean>) {
   if (isBoolean(value)) {
     return value;
   } else if (isString(value)) {
@@ -368,14 +459,16 @@ export function ensureBoolean(value: string | boolean | null | undefined) {
   return false;
 }
 
-export function ensureArray<T = unknown>(value: T): T {
+export function ensureArray<T>(value: T[]): T[];
+export function ensureArray<T>(value: T | T[]): T[];
+export function ensureArray<T = unknown>(value: T): T[] {
   if (isNil(value)) {
     return [] as any;
   }
-  return (Array.isArray(value) ? value : [value]) as T;
+  return (Array.isArray(value) ? value : [value]) as T[];
 }
 
-export function ensureStringValue(value: string, allowedValues: string[], fallback?: string): string | undefined {
+export function ensureStringValue(value: Maybe<string>, allowedValues: string[], fallback?: string): string | undefined {
   if (isNil(value)) {
     return fallback;
   }
@@ -398,35 +491,40 @@ export function isValidDate(date: Date) {
 export function bulkApiEnsureTyped(job: BulkJobBatchInfo | BulkJobBatchInfoUntyped): BulkJobBatchInfo;
 export function bulkApiEnsureTyped(job: BulkJob | BulkJobUntyped): BulkJob;
 export function bulkApiEnsureTyped(job: any | any): BulkJob | BulkJobBatchInfo {
-  if (!isObject(job)) {
+  try {
+    if (!isObject(job)) {
+      return job as BulkJob | BulkJobBatchInfo;
+    }
+    const numberTypes = [
+      'apexProcessingTime',
+      'apiActiveProcessingTime',
+      'apiVersion',
+      'numberBatchesCompleted',
+      'numberBatchesFailed',
+      'numberBatchesInProgress',
+      'numberBatchesQueued',
+      'numberBatchesTotal',
+      'numberRecordsFailed',
+      'numberRecordsProcessed',
+      'numberRetries',
+      'totalProcessingTime',
+    ];
+    if (job['$']) {
+      job['$'] = undefined;
+    }
+    if (job['@xmlns']) {
+      job['@xmlns'] = undefined;
+    }
+
+    numberTypes.forEach((prop) => {
+      if (prop in job && typeof job[prop] === 'string') {
+        job[prop] = Number(job[prop]);
+      }
+    });
+    return job as BulkJob | BulkJobBatchInfo;
+  } catch (ex) {
     return job as BulkJob | BulkJobBatchInfo;
   }
-  const numberTypes = [
-    'apexProcessingTime',
-    'apiActiveProcessingTime',
-    'apiVersion',
-    'numberBatchesCompleted',
-    'numberBatchesFailed',
-    'numberBatchesInProgress',
-    'numberBatchesQueued',
-    'numberBatchesTotal',
-    'numberRecordsFailed',
-    'numberRecordsProcessed',
-    'numberRetries',
-    'totalProcessingTime',
-  ];
-  if (job['$']) {
-    job['$'] = undefined;
-  }
-  if (job['@xmlns']) {
-    job['@xmlns'] = undefined;
-  }
-  numberTypes.forEach((prop) => {
-    if (job.hasOwnProperty(prop) && typeof job[prop] === 'string') {
-      job[prop] = Number(job[prop]);
-    }
-  });
-  return job as BulkJob | BulkJobBatchInfo;
 }
 
 export function getHttpMethod(type: InsertUpdateUpsertDelete): HttpMethod {
@@ -441,12 +539,15 @@ export function getHttpMethod(type: InsertUpdateUpsertDelete): HttpMethod {
   }
 }
 
-export function getValueOrSoapNull(value: string | SoapNil) {
-  return isString(value) ? value : null;
+export function getValueOrSoapNull(value?: string | SoapNil, unSanitize = true): string | null {
+  if (isString(value)) {
+    return unSanitize ? unSanitizeXml(value) : value;
+  }
+  return null;
 }
 
 // https://stackoverflow.com/questions/7616461/generate-a-hash-from-string-in-javascript
-export function hashString(value: string = ''): number {
+export function hashString(value = ''): number {
   let hash = 0;
   for (let i = 0; i < value.length; i++) {
     hash = (Math.imul(31, hash) + value.charCodeAt(i)) | 0;
@@ -475,7 +576,7 @@ export function unSanitizeXml(value: string) {
  *
  * VALID DATE FORMATS: DATE_FORMATS.MM_DD_YYYY, DATE_FORMATS.DD_MM_YYYY, DATE_FORMATS.YYYY_MM_DD
  */
-export function transformRecordForDataLoad(value: any, fieldType: jsforceFieldType, dateFormat?: string) {
+export function transformRecordForDataLoad(value: any, fieldType: jetstreamFieldType, dateFormat?: string) {
   dateFormat = dateFormat || DATE_FORMATS.MM_DD_YYYY;
 
   if (isNil(value) || (isString(value) && !value)) {
@@ -491,14 +592,7 @@ export function transformRecordForDataLoad(value: any, fieldType: jsforceFieldTy
   } else if (fieldType === 'datetime') {
     return transformDateTime(value, dateFormat);
   } else if (fieldType === 'time') {
-    // time format is specific
-    // TODO: detect if times should be corrected
-    // 10 PM
-    // 10:10 PM
-    // 10:10:00 PM
-    // 10:10
-    // -->expected
-    // 13:15:00.000Z
+    return transformTime(value);
   }
   return value;
 }
@@ -506,7 +600,10 @@ export function transformRecordForDataLoad(value: any, fieldType: jsforceFieldTy
 const DATE_ERR_MESSAGE =
   'There was an error reading one or more date fields in your file. Ensure date fields are properly formatted with a four character year.';
 
-function transformDate(value: any, dateFormat: string): string | null {
+const TIME_ERR_MESSAGE =
+  'There was an error reading one or more time fields in your file. Ensure time fields are properly formatted using or 00:00:00Z or 00:00:00.000Z.';
+
+function transformDate(value: any, dateFormat: string): Maybe<string> {
   if (!value) {
     return null;
   }
@@ -515,7 +612,7 @@ function transformDate(value: any, dateFormat: string): string | null {
       try {
         return formatISODate(value, { representation: 'date' });
       } catch (ex) {
-        throw new Error(DATE_ERR_MESSAGE);
+        throw new Error(`${DATE_ERR_MESSAGE} - ${value}`);
       }
     } else {
       // date is invalid
@@ -526,24 +623,93 @@ function transformDate(value: any, dateFormat: string): string | null {
       try {
         return formatISODate(parseISODate(value), { representation: 'date' });
       } catch (ex) {
-        throw new Error(DATE_ERR_MESSAGE);
+        throw new Error(`${DATE_ERR_MESSAGE} - ${value}`);
       }
     }
     try {
       return buildDateFromString(value, dateFormat, 'date');
     } catch (ex) {
-      throw new Error(DATE_ERR_MESSAGE);
+      throw new Error(`${DATE_ERR_MESSAGE} - ${value}`);
     }
   }
   return null;
 }
 
-function buildDateFromString(value: string, dateFormat: string, representation: 'date' | 'complete') {
+function transformDateTime(value: string | null | Date, dateFormat: string): Maybe<string> {
+  if (!value) {
+    return null;
+  }
+  if (value instanceof Date) {
+    if (!isNaN(value.getTime())) {
+      try {
+        return formatISODate(value, { representation: 'complete' });
+      } catch (ex) {
+        throw new Error(`${DATE_ERR_MESSAGE} - ${value}`);
+      }
+    } else {
+      // date is invalid
+      throw new Error(`${DATE_ERR_MESSAGE} - ${value}`);
+    }
+  } else if (isString(value)) {
+    try {
+      try {
+        return formatISODate(parseISODate(value), { representation: 'complete' });
+      } catch (ex) {
+        // Date not in ISO8601 compatible format, attempt to auto-detect
+      }
+      // Check if formatted in local date format, which is most likely if not ISO
+      if (isMatch('Pp', value)) {
+        return formatISODate(parseDate(value, 'Pp', new Date()), { representation: 'complete' });
+      }
+      if (isMatch('PPpp', value)) {
+        return formatISODate(parseDate(value, 'PPpp', new Date()), { representation: 'complete' });
+      }
+
+      value = value.replace('T', ' ');
+      const [date, ...timeArr] = value.split(' ');
+      const time = timeArr.join(' ');
+      const formattedDate = buildDateFromString(date.trim(), dateFormat, 'date');
+      const formattedTime = getIsoFormattedTimeFromString(time) || '00:00:00Z';
+
+      return `${formattedDate}T${formattedTime}`;
+    } catch (ex) {
+      throw new Error(`${DATE_ERR_MESSAGE} - ${value}`);
+    }
+  }
+  return null;
+}
+
+function transformTime(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    // Already in proper format
+    if (isMatch(value, `HH:mm:ss.SSS'Z'`) || isMatch(value, `HH:mm:ss'Z'`)) {
+      return value;
+    }
+    // match local format first and convert to ISO
+    if (isMatch('p', value) || isMatch('pp', value)) {
+      return formatISODate(parseDate(value, 'Pp', new Date()), { representation: 'complete' });
+    }
+    // Try various formats and convert to ISO, or return original value
+    return getIsoFormattedTimeFromString(value) || value;
+  } catch (ex) {
+    throw new Error(`${TIME_ERR_MESSAGE} - ${value}`);
+  }
+}
+
+export function buildDateFromString(value: string, dateFormat: string, representation: 'date' | 'complete') {
   const refDate = startOfDayDate(new Date());
-  const tempValue = value.replace(REGEX.NOT_NUMERIC, '-'); // FIXME: some date formats are 'd. m. yyyy' like 'sk-SK'
+  let tempValue = value.replace(REGEX.NOT_NUMERIC, '-'); // FIXME: some date formats are 'd. m. yyyy' like 'sk-SK'
+  tempValue = representation === 'date' ? tempValue.substring(0, 10) : tempValue;
   let [first, middle, end] = tempValue.split('-');
   if (!first || !middle || !end) {
     return null;
+  }
+  if (first.length === 4 && dateFormat !== DATE_FORMATS.YYYY_MM_DD) {
+    dateFormat = DATE_FORMATS.YYYY_MM_DD;
   }
   switch (dateFormat) {
     case DATE_FORMATS.MM_DD_YYYY: {
@@ -565,39 +731,25 @@ function buildDateFromString(value: string, dateFormat: string, representation: 
       return formatISODate(parseDate(`${first}-${middle}-${end}`, 'yyyy-MM-dd', refDate), { representation });
     }
     default:
-      break;
+      return null;
   }
 }
 
-function transformDateTime(value: string | null | Date, dateFormat: string): string | null {
-  if (!value) {
-    return null;
-  }
-  if (value instanceof Date) {
-    if (!isNaN(value.getTime())) {
-      return formatISODate(value, { representation: 'complete' });
-    } else {
-      // date is invalid
-      return null;
-    }
-  } else if (isString(value)) {
-    if (REGEX.ISO_DATE.test(value)) {
-      return formatISODate(parseISODate(value), { representation: 'complete' });
-    }
-
-    value = value.replace('T', ' ');
-    const [date, time] = value.split(' ', 2);
-    if (!time) {
-      return buildDateFromString(date.trim(), dateFormat, 'complete');
-    }
-
-    // TODO:
-    // based on locale, we need to parse the date and the time
-    // could be 12 hour time, or 24 hour time
-    // date will vary depending on locale
-    return null; // FIXME:
-  }
-  return null;
+function getIsoFormattedTimeFromString(time: string) {
+  const timeFormat = [
+    `HH:mm:ss.SSS'Z'`,
+    `HH:mm:ss'Z'`,
+    'p',
+    'pp',
+    'hh:mm a',
+    'hh:mm:ss a',
+    'hh:mma',
+    'hh:mm:ssa',
+    'HH:mm',
+    'HH:mm:ss',
+  ].find((format) => isMatch(time, format));
+  const formattedTime = timeFormat ? formatISODate(parseDate(time, timeFormat, new Date()), { representation: 'time' }) : null;
+  return formattedTime;
 }
 
 /**
@@ -644,8 +796,8 @@ export function getSuccessOrFailureOrWarningChar(itemSuccessCount: number, itemF
  * @param fields
  * @param subqueryFields
  */
-export function getMapOfBaseAndSubqueryRecords(records: any[], fields: string[], subqueryFields: MapOf<string[]>) {
-  const output: MapOf<any[]> = {};
+export function getMapOfBaseAndSubqueryRecords(records: any[], fields: string[], subqueryFields: Record<string, string[]>) {
+  const output: Record<string, any[]> = {};
   // output['records'] = flattenRecords(records, fields);
 
   const subqueryFieldsSet = new Set(Object.keys(subqueryFields));
@@ -711,8 +863,8 @@ export function getSizeInMbFromBase64(data: string) {
   return (data.length * 0.75 - padding) / 1e6;
 }
 
-export function flattenObjectArray(data: MapOf<string[]>, delimiter = ','): MapOf<string> {
-  const output: MapOf<string> = {};
+export function flattenObjectArray(data: Record<string, string[]>, delimiter = ','): Record<string, string> {
+  const output: Record<string, string> = {};
   Object.keys(data).forEach((key) => {
     output[key] = data[key].join(delimiter);
   });
@@ -721,4 +873,125 @@ export function flattenObjectArray(data: MapOf<string[]>, delimiter = ','): MapO
 
 export function isRecordWithId(value: any): value is { Id: string; [key: string]: any } {
   return isString(value.Id);
+}
+
+/**
+ * Flattens ListItemGroup[] into ListItem[]
+ */
+export function getFlattenedListItems(items: ListItemGroup[] = []): ListItem[] {
+  return (items || []).reduce((output: ListItem[], group) => {
+    if (group.items.length) {
+      output.push({
+        id: group.id,
+        label: group.label,
+        value: group.id,
+        isGroup: true,
+      });
+      group.items.forEach((item) =>
+        output.push({
+          ...item,
+          group: {
+            id: group.id,
+            label: group.label,
+          },
+        })
+      );
+    }
+    return output;
+  }, []);
+}
+
+// https://stackoverflow.com/questions/7394748/whats-the-right-way-to-decode-a-string-that-has-special-html-entities-in-it
+export function decodeHtmlEntity(value: Maybe<string>) {
+  return (value?.replace(/&amp;|&#(\d+);/g, (match, dec) => String.fromCharCode(dec)) || '')
+    .replaceAll('&quot;', '"')
+    .replaceAll('\x00', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>');
+}
+
+/**
+ * Some fullNames from listMetadata need to be modified
+ */
+export function getFullNameFromListMetadata({
+  metadataType,
+  namespace,
+  fullName,
+}: {
+  metadataType: string;
+  fullName: string;
+  namespace: Maybe<string>;
+}) {
+  // Fix fullName for managed package layouts
+  if (namespace && metadataType === 'Layout' && !fullName.slice(fullName.indexOf('-') + 1).startsWith(`${namespace}__`)) {
+    const objectName = fullName.slice(0, fullName.indexOf('-') + 1);
+    const layoutName = fullName.slice(fullName.indexOf('-') + 1);
+    return `${objectName}${namespace}__${layoutName}`;
+  }
+  return fullName;
+}
+
+/**
+ * Flattens query columns returned by salesforce query API
+ */
+export function flattenQueryColumn(column: QueryColumnMetadata, prevColumnPath?: string): QueryResultsColumn[] {
+  let output: QueryResultsColumn[] = [];
+  const currColumnPath = `${prevColumnPath ? `${prevColumnPath}.` : ''}${column.columnName}`;
+
+  if (Array.isArray(column.joinColumns) && column.joinColumns.length > 0) {
+    if (column.foreignKeyName) {
+      // Parent Query
+      output = output.concat(column.joinColumns.flatMap((joinColumn) => flattenQueryColumn(joinColumn, currColumnPath)));
+    } else {
+      // Child query
+      output.push({
+        columnFullPath: currColumnPath,
+        aggregate: column.aggregate,
+        apexType: column.apexType,
+        booleanType: column.booleanType,
+        columnName: column.columnName,
+        custom: column.custom,
+        displayName: column.displayName,
+        foreignKeyName: column.foreignKeyName,
+        insertable: column.insertable,
+        numberType: column.numberType,
+        textType: column.textType,
+        updatable: column.updatable,
+        childColumnPaths: column.joinColumns.flatMap((joinColumn) => flattenQueryColumn(joinColumn, currColumnPath)),
+      });
+    }
+  } else {
+    output.push({
+      columnFullPath: currColumnPath,
+      aggregate: column.aggregate,
+      apexType: column.apexType,
+      booleanType: column.booleanType,
+      columnName: column.columnName,
+      custom: column.custom,
+      displayName: column.displayName,
+      foreignKeyName: column.foreignKeyName,
+      insertable: column.insertable,
+      numberType: column.numberType,
+      textType: column.textType,
+      updatable: column.updatable,
+    });
+  }
+  return output;
+}
+
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  return uint8ArrayToBase64(new Uint8Array(buffer));
+}
+
+export function uint8ArrayToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)).buffer;
 }

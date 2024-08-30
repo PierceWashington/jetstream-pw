@@ -1,9 +1,9 @@
 import { css, SerializedStyles } from '@emotion/react';
 import { isEscapeKey } from '@jetstream/shared/ui-utils';
-import { SizeSmMdLg } from '@jetstream/types';
+import { Maybe, SizeSmMdLg } from '@jetstream/types';
 import { useDialog } from '@react-aria/dialog';
 import { FocusScope } from '@react-aria/focus';
-import { OverlayContainer, OverlayProps, useModal, useOverlay, usePreventScroll } from '@react-aria/overlays';
+import { AriaOverlayProps, OverlayContainer, useModal, useOverlay, usePreventScroll } from '@react-aria/overlays';
 import classNames from 'classnames';
 import uniqueId from 'lodash/uniqueId';
 import { forwardRef, KeyboardEvent, MutableRefObject, ReactNode, useRef, useState } from 'react';
@@ -13,8 +13,8 @@ export interface ModalProps {
   className?: string;
   classStyles?: SerializedStyles;
   hide?: boolean; // used to hide the modal without destroying contents
-  header?: string | JSX.Element;
-  tagline?: string | JSX.Element;
+  header?: Maybe<string | JSX.Element>;
+  tagline?: Maybe<string | JSX.Element>;
   footer?: JSX.Element;
   directionalFooter?: boolean;
   containerClassName?: string;
@@ -26,7 +26,7 @@ export interface ModalProps {
   /** @deprecated This no longer does anything */
   skipAutoFocus?: boolean;
   overrideZIndex?: number;
-  additionalOverlayProps?: OverlayProps;
+  additionalOverlayProps?: AriaOverlayProps;
   sectionRef?: MutableRefObject<HTMLElement>;
   children: ReactNode;
   onClose: () => void;
@@ -103,7 +103,6 @@ export const Modal = forwardRef<any, ModalProps>(
 
     return (
       <OverlayContainer
-        className={classNames({ 'is-electron': (window as any)?.electron?.isElectron })}
         // ensure children under overlay do not know this even was clicked if not handled by anything inside modal
         onContextMenu={(ev) => {
           ev.preventDefault();

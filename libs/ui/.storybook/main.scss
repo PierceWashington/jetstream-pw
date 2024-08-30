@@ -49,6 +49,10 @@ pre {
   opacity: 0.8;
 }
 
+.no-outline {
+  outline: none !important;
+}
+
 .bg-color-gray {
   background-color: $color-background;
 }
@@ -113,15 +117,15 @@ pre {
   background-position: 50%;
 }
 
-.gutter.gutter-horizontal {
-  background-image: url('assets/images/split-grip-vertical.png');
-  cursor: col-resize;
-}
+// .gutter.gutter-horizontal {
+//   background-image: url('assets/images/split-grip-vertical.png');
+//   cursor: col-resize;
+// }
 
-.gutter.gutter-vertical {
-  background-image: url('assets/images/split-grip-horizontal.png');
-  cursor: row-resize;
-}
+// .gutter.gutter-vertical {
+//   background-image: url('assets/images/split-grip-horizontal.png');
+//   cursor: row-resize;
+// }
 
 .bg-white {
   background-color: $color-background-alt;
@@ -154,8 +158,11 @@ pre {
   &:not(.read-only) {
     cursor: pointer;
   }
+  &.disabled {
+    cursor: not-allowed;
+  }
   margin: 1px;
-  &:not(.read-only):hover {
+  &:not(.disabled):not(.read-only):hover {
     background-color: $color-background;
   }
   &:not(.read-only).is-active {
@@ -175,8 +182,24 @@ pre {
   border-radius: 0.25rem;
 }
 
+.border-color-brand {
+  border-color: $color-border-brand;
+}
+
+.border-color-brand-dark {
+  border-color: $color-border-brand-dark;
+}
+
 .slds-text-color_brand {
   color: $brand-accessible;
+}
+
+.slds-popover_x-large {
+  width: 75%;
+}
+
+.slds-panel.slds-size_full {
+  width: 75vw;
 }
 
 /**
@@ -199,6 +222,126 @@ pre {
   &:focus {
     text-decoration: underline;
     color: $brand-text-link-active;
+  }
+}
+
+.collapsible-button {
+  min-height: 2rem;
+
+  span:not(.slds-icon_container) {
+    display: none;
+  }
+
+  svg.slds-button__icon_left {
+    margin-right: 0;
+  }
+
+  &.collapsible-button-xs {
+    @media (max-width: 500px) {
+      width: 2rem;
+      padding-left: unset;
+      padding-right: unset;
+    }
+
+    @media (min-width: 500px) {
+      span {
+        display: inline;
+      }
+
+      svg.slds-button__icon_left {
+        margin-right: 0.5rem;
+      }
+    }
+  }
+
+  &.collapsible-button-sm {
+    @media (max-width: 800px) {
+      width: 2rem;
+      padding-left: unset;
+      padding-right: unset;
+    }
+
+    @media (min-width: 800px) {
+      span {
+        display: inline;
+      }
+
+      svg.slds-button__icon_left {
+        margin-right: 0.5rem;
+      }
+    }
+  }
+
+  &.collapsible-button-md {
+    @media (max-width: 830px) {
+      width: 2rem;
+      padding-left: unset;
+      padding-right: unset;
+    }
+
+    @media (min-width: 830px) {
+      span {
+        display: inline;
+      }
+
+      svg.slds-button__icon_left {
+        margin-right: 0.5rem;
+      }
+    }
+  }
+
+  &.collapsible-button-lg {
+    @media (max-width: 890px) {
+      width: 2rem;
+      padding-left: unset;
+      padding-right: unset;
+    }
+
+    @media (min-width: 890px) {
+      span {
+        display: inline;
+      }
+
+      svg.slds-button__icon_left {
+        margin-right: 0.5rem;
+      }
+    }
+  }
+
+  &.collapsible-button-xl {
+    @media (max-width: 1000px) {
+      width: 2rem;
+      padding-left: unset;
+      padding-right: unset;
+    }
+
+    @media (min-width: 1000px) {
+      span {
+        display: inline;
+      }
+
+      svg.slds-button__icon_left {
+        margin-right: 0.5rem;
+      }
+    }
+  }
+
+  &.collapsible-button-xxl {
+    @media (max-width: 1075px) {
+      width: 2rem;
+      padding-left: unset;
+      padding-right: unset;
+    }
+
+    @media (min-width: 1075px) {
+      span {
+        display: inline;
+      }
+
+      svg.slds-button__icon_left {
+        margin-right: 0.5rem;
+      }
+    }
   }
 }
 
@@ -322,63 +465,4 @@ button.ql-active {
 
 .app-container {
   margin-top: var(--app-top-offset);
-}
-
-.is-electron {
-  .app-container {
-    margin-top: unset;
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    top: var(--app-top-offset);
-    // overflow-x: hidden;
-  }
-
-  .slds-modal {
-    top: var(--app-top-offset);
-  }
-
-  .global-titlebar {
-    position: absolute;
-    top: env(titlebar-area-y, 0);
-    // height: env(titlebar-area-height, var(--title-bar-height));
-    height: var(--title-bar-height);
-    // width: 100%;
-    width: env(titlebar-area-width, 100%);
-    background-color: var(--app-brand-color);
-
-    .draggable {
-      app-region: drag;
-      /* Pre-fix app-region during standardization process */
-      -webkit-app-region: drag;
-    }
-
-    .non-draggable {
-      app-region: no-drag;
-      /* Pre-fix app-region during standardization process */
-      -webkit-app-region: no-drag;
-    }
-
-    .titlebar {
-      position: absolute;
-      top: 0;
-      display: flex;
-      user-select: none;
-      height: 100%;
-      left: env(titlebar-area-x, 0);
-      width: calc(100vw - 5.5rem);
-    }
-
-    .slds-button.slds-button_icon {
-      color: white;
-      &.slds-button_icon-border-filled {
-        color: $brand-header-icon;
-      }
-    }
-  }
-
-  .electron-navbar {
-    margin-top: var(--title-bar-height);
-  }
 }

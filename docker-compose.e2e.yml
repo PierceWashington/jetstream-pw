@@ -12,8 +12,8 @@ services:
     environment:
       NODE_ENV: production
       ENVIRONMENT: production
-      JESTREAM_POSTGRES_DBURI: postgres://postgres:postgres@postgres:5432/postgres
-      JESTREAM_SESSION_SECRET: '${JESTREAM_SESSION_SECRET}'
+      JETSTREAM_POSTGRES_DBURI: postgres://postgres:postgres@postgres:5432/postgres
+      JETSTREAM_SESSION_SECRET: '${JETSTREAM_SESSION_SECRET}'
       JETSTREAM_CLIENT_URL: http://localhost:3333/app
       JETSTREAM_SERVER_DOMAIN: localhost:3333
       JETSTREAM_SERVER_URL: http://localhost:3333
@@ -24,13 +24,13 @@ services:
       AUTH0_MGMT_CLIENT_ID: '${AUTH0_MGMT_CLIENT_ID}'
       AUTH0_MGMT_CLIENT_SECRET: '${AUTH0_MGMT_CLIENT_SECRET}'
       AUTH0_CLIENT_SECRET: '${AUTH0_CLIENT_SECRET}'
-      SFDC_FALLBACK_API_VERSION: '${SFDC_FALLBACK_API_VERSION}'
+      SFDC_API_VERSION: '${SFDC_API_VERSION}'
       SFDC_CONSUMER_SECRET: '${SFDC_CONSUMER_SECRET}'
       SFDC_CONSUMER_KEY: '${SFDC_CONSUMER_KEY}'
       SFDC_CALLBACK_URL: '${SFDC_CALLBACK_URL}'
-      NX_ROLLBAR_KEY: '${NX_ROLLBAR_KEY}'
-      NX_AMPLITUDE_KEY: '${NX_AMPLITUDE_KEY}'
-      NX_AUTH_AUDIENCE: '${NX_AUTH_AUDIENCE}'
+      NX_PUBLIC_ROLLBAR_KEY: '${NX_PUBLIC_ROLLBAR_KEY}'
+      NX_PUBLIC_AMPLITUDE_KEY: '${NX_PUBLIC_AMPLITUDE_KEY}'
+      NX_PUBLIC_AUTH_AUDIENCE: '${NX_PUBLIC_AUTH_AUDIENCE}'
     ports:
       - '3333:3333'
       - '9229:9229'
@@ -63,7 +63,7 @@ services:
     environment:
       NODE_ENV: production
       ENVIRONMENT: production
-      JESTREAM_POSTGRES_DBURI: postgres://postgres:postgres@postgres:5432/postgres
+      JETSTREAM_POSTGRES_DBURI: postgres://postgres:postgres@postgres:5432/postgres
 volumes:
   db:
     driver: local

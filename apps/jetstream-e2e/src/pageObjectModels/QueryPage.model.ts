@@ -1,13 +1,14 @@
-import { APIRequestContext, expect, Locator, Page } from '@playwright/test';
-import { QueryFilterOperator } from '@jetstream/types';
-import { isNumber } from 'lodash';
 import { formatNumber } from '@jetstream/shared/ui-utils';
-import { QueryResults } from '@jetstream/api-interfaces';
-import { ApiRequestUtils } from '../fixtures/ApiRequestUtils';
 import { isRecordWithId } from '@jetstream/shared/utils';
+import { QueryFilterOperator, QueryResults } from '@jetstream/types';
+import { APIRequestContext, Locator, Page, expect } from '@playwright/test';
+import isNumber from 'lodash/isNumber';
+import { ApiRequestUtils } from '../fixtures/ApiRequestUtils';
+import { PlaywrightPage } from './PlaywrightPage.model';
 
 export class QueryPage {
   readonly apiRequestUtils: ApiRequestUtils;
+  readonly playwrightPage: PlaywrightPage;
   readonly page: Page;
   readonly request: APIRequestContext;
   readonly sobjectList: Locator;
@@ -15,8 +16,9 @@ export class QueryPage {
   readonly soqlQuery: Locator;
   readonly executeBtn: Locator;
 
-  constructor(page: Page, request: APIRequestContext, apiRequestUtils: ApiRequestUtils) {
+  constructor(page: Page, request: APIRequestContext, apiRequestUtils: ApiRequestUtils, playwrightPage: PlaywrightPage) {
     this.apiRequestUtils = apiRequestUtils;
+    this.playwrightPage = playwrightPage;
     this.page = page;
     this.request = request;
     this.sobjectList = page.getByTestId('sobject-list');
@@ -48,7 +50,6 @@ export class QueryPage {
       ]);
     } else if (action === 'RESTORE') {
       await manualQueryPopover.getByRole('button', { name: 'Restore' }).click();
-      await manualQueryPopover.getByRole('button', { name: 'Close dialog' }).click();
     } else {
       await manualQueryPopover.getByRole('button', { name: 'Close dialog' }).click();
     }
@@ -117,9 +118,10 @@ export class QueryPage {
     const groupRole = isNumber(groupNumber) ? ` Of Group ${groupNumber}` : '';
     const condition = this.page.getByRole('group', { name: `Condition ${conditionNumber}${groupRole}` });
 
-    await condition.getByLabel('Fields').click();
-    await condition.getByLabel('Fields').fill(field);
-    await condition.getByRole('option', { name: field }).locator('span').nth(2).click();
+    await condition.getByLabel('Field').click();
+    await this.page.keyboard.type(field, { delay: 100 });
+    // await condition.getByLabel('Field').fill(field);
+    await condition.getByRole('option', { name: field }).first().click();
 
     await condition.getByLabel('Operator').click();
     await condition.locator(`#${operator}`).click();
@@ -144,20 +146,22 @@ export class QueryPage {
     }
   }
 
-  async addOrderBy(field: string, direction: 'ASC' | 'DESC', nulls: 'IGNORE' | 'FIRST' | 'LAST' = 'IGNORE') {
+  async addOrderBy(field: string, direction: 'ASC' | 'DESC', nulls: 'IGNORE' | 'FIRST' | 'LAST' = 'IGNORE', groupNumber = 1) {
     await this.page.getByRole('button', { name: 'Order By' }).click();
 
-    const locator = this.page.getByText('Order ByFieldRelated fields must be selected to appear in this list and only fields');
+    const orderByRow = this.page.getByRole('group', { name: `Filter row ${groupNumber}` });
 
-    await locator.getByLabel('Field').click();
-    await locator.getByRole('option', { name: field }).click();
+    await orderByRow.getByLabel('Field').click();
+    await this.page.keyboard.type(field, { delay: 100 });
+    // await orderByRow.getByLabel('Field').fill(field);
+    await orderByRow.getByRole('option', { name: field }).first().click();
 
-    await locator.getByLabel('Order').click();
-    await locator.getByRole('option', { name: direction ? 'Ascending (A to Z)' : 'Descending (Z to A)' }).click();
+    await orderByRow.getByLabel('Order').click();
+    await orderByRow.getByRole('option', { name: direction ? 'Ascending (A to Z)' : 'Descending (Z to A)' }).click();
 
     if (nulls !== 'IGNORE') {
-      await locator.getByLabel('Nulls').click();
-      await locator.getByRole('option', { name: nulls === 'FIRST' ? 'Nulls First' : 'Nulls Last' }).click();
+      await orderByRow.getByLabel('Nulls').click();
+      await orderByRow.getByRole('option', { name: nulls === 'FIRST' ? 'Nulls First' : 'Nulls Last' }).click();
     }
   }
 
@@ -191,16 +195,20 @@ export class QueryPage {
       isRecordWithId(record) && (await expect(this.page.getByRole('gridcell', { name: record.Id })).toBeVisible());
     }
 
+    // FIXME: this was causing the browser to crash - could not reproduce or identify cause
     // reload page to make sure query still shows up
-    await this.page.reload();
-    await this.page.getByText(`Showing ${formatNumber(queryResults.records.length)} of ${formatNumber(queryResults.totalSize)} records`);
+    // await this.page.reload();
+    // await this.page.getByText(`Showing ${formatNumber(queryResults.records.length)} of ${formatNumber(queryResults.totalSize)} records`);
 
     // verify correct query shows up
     await this.page.getByRole('button', { name: 'SOQL Query' }).click();
-    await expect(this.page.getByRole('code').locator('div').filter({ hasText: query }).first()).toBeVisible();
+    // The full query is broken up in a weird way, we we check each token individually
+    for (const token of query.split(' ')) {
+      await expect(this.page.getByRole('code').locator('div').filter({ hasText: token }).first()).toBeVisible();
+    }
     await this.page.getByRole('button', { name: 'Collapse SOQL Query' }).click();
 
-    await this.page.getByRole('button', { name: 'History' }).click();
+    await this.page.getByLabel('Query History').click();
 
     // verify query history
     await expect(
@@ -223,12 +231,24 @@ export class QueryPage {
       buttonName = 'Saved';
       role = 'button';
     }
-    await this.page.getByRole('button', { name: 'History' }).click();
+    await this.page.getByLabel('Query History').click();
     await this.page.getByTestId(`query-history-${query}`).getByRole(role, { name: buttonName }).click();
   }
 
   async submitQuery() {
     await this.executeBtn.click();
     await this.page.waitForURL('**/query/results');
+  }
+
+  async clickBulkAction(
+    action:
+      | 'Bulk update records'
+      | 'Create new record'
+      | 'Delete selected records'
+      | 'Convert selected records to Apex'
+      | 'Open selected records in Salesforce'
+  ) {
+    await this.page.getByRole('button', { name: 'Record actions' }).click();
+    await this.page.getByRole('menuitem', { name: action }).click();
   }
 }

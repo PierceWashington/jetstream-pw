@@ -1,16 +1,17 @@
 import { logger } from '@jetstream/shared/client-logger';
 import { clearCacheForOrg, queryWithCache } from '@jetstream/shared/data';
-import { isPermissionSetWithProfile } from '../shared-ui-utils';
 import {
   ListItem,
+  Maybe,
   PermissionSetNoProfileRecord,
   PermissionSetRecord,
   PermissionSetWithProfileRecord,
   SalesforceOrgUi,
 } from '@jetstream/types';
-import formatRelative from 'date-fns/formatRelative';
+import { Query, composeQuery, getField } from '@jetstreamapp/soql-parser-js';
+import { formatRelative } from 'date-fns/formatRelative';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { composeQuery, getField, Query } from 'soql-parser-js';
+import { isPermissionSetWithProfile } from '../shared-ui-utils';
 
 let _lastRefreshed: string;
 
@@ -24,10 +25,10 @@ let _lastRefreshed: string;
  */
 export function useProfilesAndPermSets(
   selectedOrg: SalesforceOrgUi,
-  _initProfiles?: ListItem<string, PermissionSetWithProfileRecord>[],
-  _initPermissionSets?: ListItem<string, PermissionSetNoProfileRecord>[]
+  _initProfiles?: ListItem<string, PermissionSetWithProfileRecord>[] | null,
+  _initPermissionSets?: ListItem<string, PermissionSetNoProfileRecord>[] | null
 ) {
-  const isMounted = useRef(null);
+  const isMounted = useRef(true);
   const [lastRefreshed, setLastRefreshed] = useState<string>(_lastRefreshed);
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
@@ -35,6 +36,27 @@ export function useProfilesAndPermSets(
   const [permissionSets, setPermissionSets] = useState<ListItem<string, PermissionSetNoProfileRecord>[] | null>(
     _initPermissionSets || null
   );
+
+  const [profilesAndPermSetsById, setProfilesAndPermSetsById] = useState<
+    Record<string, PermissionSetWithProfileRecord | PermissionSetNoProfileRecord>
+  >({});
+
+  useEffect(() => {
+    if (profiles && permissionSets) {
+      const newItemsById: Record<string, PermissionSetWithProfileRecord | PermissionSetNoProfileRecord> = {};
+      profiles.forEach((item) => {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        newItemsById[item.id] = item.meta!;
+      });
+      permissionSets.forEach((item) => {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+        newItemsById[item.id] = item.meta!;
+      });
+      setProfilesAndPermSetsById(newItemsById);
+    } else {
+      setProfilesAndPermSetsById({});
+    }
+  }, [profiles, permissionSets]);
 
   useEffect(() => {
     isMounted.current = true;
@@ -62,6 +84,9 @@ export function useProfilesAndPermSets(
 
   const fetchMetadata = useCallback(
     async (skipCache = false) => {
+      if (!selectedOrg) {
+        return;
+      }
       try {
         setLoading(true);
         if (hasError) {
@@ -102,7 +127,15 @@ export function useProfilesAndPermSets(
     [selectedOrg]
   );
 
-  return { fetchMetadata, loading, profiles, permissionSets, hasError, lastRefreshed };
+  return {
+    fetchMetadata,
+    loading: loading && !profiles?.length,
+    profiles,
+    permissionSets,
+    profilesAndPermSetsById,
+    hasError,
+    lastRefreshed,
+  };
 }
 
 /**
@@ -142,7 +175,7 @@ function getListItemFromQueryResults(records: PermissionSetRecord[]) {
   );
 }
 
-function getQueryForPermissionSetsWithProfiles(orgNamespace?: string): string {
+function getQueryForPermissionSetsWithProfiles(orgNamespace?: Maybe<string>): string {
   const query: Query = {
     fields: [
       getField('Id'),

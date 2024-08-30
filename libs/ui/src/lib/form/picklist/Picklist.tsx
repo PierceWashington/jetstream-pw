@@ -1,15 +1,11 @@
 /* eslint-disable jsx-a11y/anchor-is-valid */
 import { IconName } from '@jetstream/icon-factory';
 import {
-  hasCtrlModifierKey,
-  hasShiftModifierKey,
-  isAKey,
   isArrowDownKey,
   isArrowUpKey,
-  isControlKey,
   isEnterKey,
   isEscapeKey,
-  isShiftKey,
+  isSpaceKey,
   isTabKey,
   KeyBuffer,
   menuItemSelectScroll,
@@ -17,11 +13,13 @@ import {
   trapEventImmediate,
   useNonInitialEffect,
 } from '@jetstream/shared/ui-utils';
+import { NOOP } from '@jetstream/shared/utils';
 import { DropDownItemLength, ListItem, ListItemGroup } from '@jetstream/types';
 import classNames from 'classnames';
 import isNumber from 'lodash/isNumber';
 import uniqueId from 'lodash/uniqueId';
 import React, { createRef, forwardRef, KeyboardEvent, RefObject, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import PopoverContainer from '../../popover/PopoverContainer';
 import OutsideClickHandler from '../../utils/OutsideClickHandler';
 import HelpText from '../../widgets/HelpText';
 import Icon from '../../widgets/Icon';
@@ -41,13 +39,14 @@ export interface PicklistProps {
   containerDisplay?: 'block' | 'flex' | 'inline' | 'inline-block' | 'contents';
   label: string;
   hideLabel?: boolean;
-  labelHelp?: string;
+  labelHelp?: string | null;
   helpText?: React.ReactNode | string;
   hasError?: boolean;
   isRequired?: boolean;
   errorMessageId?: string;
   errorMessage?: React.ReactNode | string;
   placeholder?: string;
+  noItemsPlaceholder?: string;
   items?: ListItem[];
   groups?: ListItemGroup[];
   /** Only applies on initialization, then the component will manage ongoing state */
@@ -60,6 +59,7 @@ export interface PicklistProps {
   scrollLength?: DropDownItemLength;
   disabled?: boolean;
   onChange: (selectedItems: ListItem[]) => void;
+  onClose?: () => void;
   onBlur?: () => void;
 }
 
@@ -94,7 +94,8 @@ export const Picklist = forwardRef<any, PicklistProps>(
       isRequired,
       errorMessageId,
       errorMessage,
-      placeholder,
+      placeholder = 'Select an Option',
+      noItemsPlaceholder = 'There are no items for selection',
       items = [],
       groups,
       selectedItems = [],
@@ -105,10 +106,12 @@ export const Picklist = forwardRef<any, PicklistProps>(
       scrollLength,
       disabled,
       onChange,
+      onClose,
       onBlur,
     },
     ref
   ) => {
+    const inputRef = useRef<HTMLInputElement>(null);
     const keyBuffer = useRef(new KeyBuffer());
     const [comboboxId] = useState<string>(() => uniqueId(id || 'picklist'));
     const [listboxId] = useState<string>(() => uniqueId('listbox'));
@@ -124,7 +127,7 @@ export const Picklist = forwardRef<any, PicklistProps>(
     });
     const [selectedItemText, setSelectedItemText] = useState<string>(() => getSelectItemText(selectedItemsIdsSet, items));
     const scrollLengthClass = useMemo(() => `slds-dropdown_length-${scrollLength || 5}`, [scrollLength]);
-    const [focusedItem, setFocusedItem] = useState<number>(null);
+    const [focusedItem, setFocusedItem] = useState<number | null>(null);
     const divContainerEl = useRef<HTMLDivElement>(null);
     const elRefs = useRef<RefObject<HTMLLIElement>[]>([]);
 
@@ -145,12 +148,14 @@ export const Picklist = forwardRef<any, PicklistProps>(
     useNonInitialEffect(() => {
       if (elRefs.current && isNumber(focusedItem) && elRefs.current[focusedItem] && elRefs.current[focusedItem]) {
         try {
-          elRefs.current[focusedItem].current.focus();
+          elRefs.current?.[focusedItem]?.current?.focus();
 
-          menuItemSelectScroll({
-            container: divContainerEl.current,
-            focusedIndex: focusedItem,
-          });
+          if (divContainerEl.current) {
+            menuItemSelectScroll({
+              container: divContainerEl.current,
+              focusedIndex: focusedItem,
+            });
+          }
         } catch (ex) {
           // silent failure
         }
@@ -164,7 +169,7 @@ export const Picklist = forwardRef<any, PicklistProps>(
     }, [disabled, isOpen]);
 
     useNonInitialEffect(() => {
-      onChange(items.filter((item) => selectedItemsIdsSet.has(item.id)));
+      onChange(items.filter((item) => selectedItemsIdsSet.has(item?.id)));
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedItemsIdsSet]);
 
@@ -203,7 +208,7 @@ export const Picklist = forwardRef<any, PicklistProps>(
           selectedItemsIdsSet.clear();
           // if user clicked on new item in list, close
           if (!hasItem) {
-            setIsOpen(false);
+            handleClose();
           }
         }
         selectedItemsIdsSet.add(id);
@@ -212,32 +217,19 @@ export const Picklist = forwardRef<any, PicklistProps>(
       setSelectedItemsIdsSet(new Set(selectedItemsIdsSet));
     }
 
-    function handleKeyboardSelection(
-      item: ListItem,
-      options: {
-        ctrlModifier?: boolean;
-        shiftModifier?: boolean;
-        isAKey?: boolean;
+    function handleKeyboardSelection(item: ListItem) {
+      if (!item?.id) {
+        return;
       }
-    ) {
-      const { ctrlModifier, shiftModifier, isAKey } = options;
 
       if (multiSelection) {
-        if (ctrlModifier && isAKey) {
-          // toggle select/de-select all
-          const newSelectedItemIdSet = selectedItemsIdsSet.size === items.length ? new Set() : new Set(items.map((item) => item.id));
-          setSelectedItemsIdsSet(newSelectedItemIdSet);
-        } else if (shiftModifier) {
-          // when shift is pressed, then select or unselect current item and leave all others selected
-          if (selectedItemsIdsSet.has(item.id)) {
-            selectedItemsIdsSet.delete(item.id);
-          } else {
-            selectedItemsIdsSet.add(item.id);
-          }
-          setSelectedItemsIdsSet(new Set(selectedItemsIdsSet));
+        const newSelectedItemIdSet = new Set(selectedItemsIdsSet);
+        if (newSelectedItemIdSet.has(item.id)) {
+          newSelectedItemIdSet.delete(item.id);
         } else {
-          setSelectedItemsIdsSet(new Set([item.id]));
+          newSelectedItemIdSet.add(item.id);
         }
+        setSelectedItemsIdsSet(newSelectedItemIdSet);
       } else {
         setSelectedItemsIdsSet(new Set([item.id]));
       }
@@ -245,18 +237,31 @@ export const Picklist = forwardRef<any, PicklistProps>(
 
     function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
       let newFocusedItem = focusedItem;
-      if (isControlKey(event) || isShiftKey(event)) {
-        return;
-      } else if (isTabKey(event) || isEscapeKey(event) || isEnterKey(event)) {
+
+      if (isTabKey(event) || isEscapeKey(event)) {
         event.preventDefault();
         event.stopPropagation();
         setIsOpen(false);
+        inputRef.current?.focus();
+        return;
+      }
+
+      if (isEnterKey(event) || isSpaceKey(event)) {
+        const item = items[focusedItem ?? -1];
+        if (item) {
+          handleKeyboardSelection(item);
+          if (!multiSelection) {
+            setIsOpen(false);
+            inputRef.current?.focus();
+          }
+        }
         return;
       }
 
       if (!isOpen) {
         setIsOpen(true);
       }
+
       if (isArrowDownKey(event)) {
         event.preventDefault();
         event.stopPropagation();
@@ -264,7 +269,7 @@ export const Picklist = forwardRef<any, PicklistProps>(
         if (!isNumber(focusedItem) || focusedItem === items.length - 1) {
           newFocusedItem = 0;
         } else {
-          newFocusedItem = newFocusedItem + 1;
+          newFocusedItem = (newFocusedItem || 0) + 1;
         }
       } else if (isArrowUpKey(event)) {
         event.preventDefault();
@@ -273,7 +278,7 @@ export const Picklist = forwardRef<any, PicklistProps>(
         if (!isNumber(focusedItem) || focusedItem === 0) {
           newFocusedItem = items.length - 1;
         } else {
-          newFocusedItem = newFocusedItem - 1;
+          newFocusedItem = (newFocusedItem || 0) - 1;
         }
       } else {
         let allItems: ListItem[] = [];
@@ -297,13 +302,6 @@ export const Picklist = forwardRef<any, PicklistProps>(
 
       if (isNumber(newFocusedItem)) {
         setFocusedItem(newFocusedItem);
-        const item = items[newFocusedItem];
-
-        handleKeyboardSelection(item, {
-          ctrlModifier: hasCtrlModifierKey(event),
-          shiftModifier: hasShiftModifierKey(event),
-          isAKey: isAKey(event),
-        });
       }
     }
 
@@ -313,9 +311,14 @@ export const Picklist = forwardRef<any, PicklistProps>(
       }
     }
 
+    function handleClose() {
+      setIsOpen(false);
+      onClose?.();
+    }
+
     return (
-      <OutsideClickHandler display={containerDisplay} onOutsideClick={() => setIsOpen(false)}>
-        <div className={classNames('slds-form-element', className, { 'slds-has-error': hasError })}>
+      <OutsideClickHandler display={containerDisplay} onOutsideClick={() => handleClose()}>
+        <div data-testid={`dropdown-${label || id}`} className={classNames('slds-form-element', className, { 'slds-has-error': hasError })}>
           <label className={classNames('slds-form-element__label', { 'slds-assistive-text': hideLabel })} htmlFor={comboboxId}>
             {isRequired && (
               <abbr className="slds-required" title="required">
@@ -324,7 +327,7 @@ export const Picklist = forwardRef<any, PicklistProps>(
             )}
             {label}
           </label>
-          {labelHelp && <HelpText id={`${comboboxId}-label-help-text`} content={labelHelp} />}
+          {labelHelp && !hideLabel && <HelpText id={`${comboboxId}-label-help-text`} content={labelHelp} />}
           <div className="slds-form-element__control" ref={divContainerEl}>
             <div className={containerClassName || 'slds-combobox_container'}>
               <div
@@ -337,6 +340,7 @@ export const Picklist = forwardRef<any, PicklistProps>(
               >
                 <div className="slds-combobox__form-element slds-input-has-icon slds-input-has-icon_right" role="none">
                   <input
+                    ref={inputRef}
                     type="text"
                     className={classNames('slds-input slds-combobox__input slds-combobox__input-value', { 'slds-has-focus': isOpen })}
                     id={comboboxId}
@@ -360,58 +364,68 @@ export const Picklist = forwardRef<any, PicklistProps>(
                     />
                   </span>
                 </div>
-                {isOpen && (
-                  <div
-                    id={listboxId}
-                    className={classNames('slds-dropdown slds-dropdown_fluid', scrollLengthClass)}
-                    role="listbox"
-                    onKeyDown={handleKeyDown}
-                  >
-                    {Array.isArray(items) && (
-                      <ul className="slds-listbox slds-listbox_vertical" role="presentation">
-                        {items.map((item, i) => (
+                <PopoverContainer
+                  id={listboxId}
+                  isOpen={isOpen}
+                  className={classNames('slds-dropdown_fluid', scrollLengthClass)}
+                  referenceElement={inputRef.current}
+                  role="listbox"
+                  onKeyDown={handleKeyDown}
+                >
+                  {Array.isArray(items) && (
+                    <ul className="slds-listbox slds-listbox_vertical" role="presentation">
+                      {items.length === 0 && (
+                        <PicklistItem
+                          id={noItemsPlaceholder}
+                          label={noItemsPlaceholder}
+                          title={noItemsPlaceholder}
+                          value={noItemsPlaceholder}
+                          isSelected={false}
+                          onClick={() => NOOP}
+                        />
+                      )}
+                      {items.map((item, i) => (
+                        <PicklistItem
+                          ref={elRefs.current[i]}
+                          key={item.id}
+                          id={item.id}
+                          label={item.label}
+                          secondaryLabel={item.secondaryLabel}
+                          secondaryLabelOnNewLine={item.secondaryLabelOnNewLine}
+                          title={item.title}
+                          value={item.value}
+                          isSelected={selectedItemsIdsSet.has(item.id)}
+                          onClick={() => handleSelection(item)}
+                        />
+                      ))}
+                    </ul>
+                  )}
+                  {Array.isArray(groups) &&
+                    groups.map((group) => (
+                      <ul key={group.id} className="slds-listbox slds-listbox_vertical" role="group" aria-label={group.label}>
+                        <li role="presentation" className="slds-listbox__item slds-item">
+                          <div className="slds-media slds-listbox__option slds-listbox__option_plain slds-media_small" role="presentation">
+                            <h3 className="slds-listbox__option-header" role="presentation">
+                              {group.label}
+                            </h3>
+                          </div>
+                        </li>
+                        {group.items.map((item, i) => (
                           <PicklistItem
                             ref={elRefs.current[i]}
                             key={item.id}
                             id={item.id}
                             label={item.label}
-                            secondaryLabel={item.secondaryLabel}
-                            title={item.title}
                             value={item.value}
+                            secondaryLabel={item.secondaryLabel}
+                            secondaryLabelOnNewLine={item.secondaryLabelOnNewLine}
                             isSelected={selectedItemsIdsSet.has(item.id)}
                             onClick={() => handleSelection(item)}
                           />
                         ))}
                       </ul>
-                    )}
-                    {Array.isArray(groups) &&
-                      groups.map((group) => (
-                        <ul key={group.id} className="slds-listbox slds-listbox_vertical" role="group" aria-label={group.label}>
-                          <li role="presentation" className="slds-listbox__item slds-item">
-                            <div
-                              className="slds-media slds-listbox__option slds-listbox__option_plain slds-media_small"
-                              role="presentation"
-                            >
-                              <h3 className="slds-listbox__option-header" role="presentation">
-                                {group.label}
-                              </h3>
-                            </div>
-                          </li>
-                          {group.items.map((item, i) => (
-                            <PicklistItem
-                              ref={elRefs.current[i]}
-                              key={item.id}
-                              id={item.id}
-                              label={item.label}
-                              value={item.value}
-                              isSelected={selectedItemsIdsSet.has(item.id)}
-                              onClick={() => handleSelection(item)}
-                            />
-                          ))}
-                        </ul>
-                      ))}
-                  </div>
-                )}
+                    ))}
+                </PopoverContainer>
               </div>
             </div>
             {multiSelection && !omitMultiSelectPills && selectedItemsIdsSet.size > 0 && (

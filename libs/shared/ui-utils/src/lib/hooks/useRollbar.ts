@@ -1,18 +1,18 @@
-import { Environment, UserProfileUi } from '@jetstream/types';
 import { logBuffer, logger } from '@jetstream/shared/client-logger';
-import { useState } from 'react';
-import Rollbar from 'rollbar';
-import { useNonInitialEffect } from './useNonInitialEffect';
+import { NOOP } from '@jetstream/shared/utils';
+import { Environment, UserProfileUi } from '@jetstream/types';
 import isBoolean from 'lodash/isBoolean';
+import { useState } from 'react';
+import Rollbar, { LogArgument } from 'rollbar';
+import { useNonInitialEffect } from './useNonInitialEffect';
 
-const VERSION = process.env.GIT_VERSION;
-const REPLACE_HOST_REGEX = /[a-zA-Z0-9._-]*?getjetstream.app/;
+const ignoredMessagesSet = new Set(['expired access/refresh token', 'socket hang up']);
 
 interface RollbarProperties {
   accessToken?: string;
   environment?: Environment;
   userProfile?: UserProfileUi;
-  // serverUrl?: string; // could not get proxy config working
+  version?: string;
 }
 
 const getRecentLogs = () => {
@@ -29,7 +29,7 @@ class RollbarConfig {
   private accessToken: string;
   private environment: string;
   private userProfile: UserProfileUi;
-  // private serverUrl: string;
+  private version: string;
   public rollbar: Rollbar;
   public rollbarIsConfigured: boolean;
   public optOut = false;
@@ -40,7 +40,7 @@ class RollbarConfig {
     this.accessToken = options.accessToken || this.accessToken;
     this.environment = options.environment || this.environment;
     this.userProfile = options.userProfile || this.userProfile;
-    // this.serverUrl = options.serverUrl || this.serverUrl;
+    this.version = options.version || this.version;
 
     if (this.rollbarIsConfigured || !this.accessToken || !this.environment) {
       return;
@@ -49,28 +49,31 @@ class RollbarConfig {
       this.rollbar ||
       new Rollbar({
         enabled: !this.optOut,
-        codeVersion: VERSION,
-        code_version: VERSION,
+        codeVersion: this.version,
+        code_version: this.version,
         accessToken: this.accessToken,
         captureUncaught: true,
         captureUnhandledRejections: true,
         environment: this.environment,
-        // Unable to get proxy config working
-        // endpoint: this.serverUrl ? `${this.serverUrl}/rollbar` : 'https://api.rollbar.com/api/1/item',
-        autoInstrument: {
-          // eslint-disable-next-line no-restricted-globals
-          log: location.hostname !== 'localhost',
+        // autoInstrument: {
+        //   // eslint-disable-next-line no-restricted-globals
+        //   log: location.hostname !== 'localhost',
+        // },
+        // hostBlockList: ['localhost'],
+        checkIgnore: function (isUncaught, args, payload) {
+          logger.log('[ROLLBAR] checkIgnore', isUncaught, args, payload);
+          if (ignoredMessagesSet.has(payload?.body?.['message']?.extra?.message)) {
+            return true;
+          }
+          return false;
         },
-        hostBlockList: ['localhost'],
+        ignoredMessages: Array.from(ignoredMessagesSet),
         payload: {
-          server: {
-            root: 'webpack:///./',
-          },
           client: {
             javascript: {
               source_map_enabled: true,
               environment: this.environment,
-              code_version: VERSION,
+              code_version: this.version,
             },
           },
         },
@@ -78,19 +81,6 @@ class RollbarConfig {
         onSendCallback: (_isUncaught: boolean, _args: Rollbar.LogArgument[], payload: any) => {
           payload = payload || {};
           payload.recentLogs = getRecentLogs();
-        },
-        // https://docs.rollbar.com/docs/source-maps#using-source-maps-on-many-domains
-        transform: (payload: any) => {
-          const trace = payload.body.trace;
-          if (trace?.frames) {
-            for (let i = 0; i < trace.frames.length; i++) {
-              const filename = trace.frames[i].filename;
-              if (filename) {
-                // Use dynamichost so that sourcemaps only need to be uploaded once and can be shared across all environments
-                trace.frames[i].filename = trace.frames[i].filename.replace(REPLACE_HOST_REGEX, 'dynamichost');
-              }
-            }
-          }
         },
       });
     this.rollbar.global({ itemsPerMinute: 10, maxItems: 20 });
@@ -104,8 +94,23 @@ class RollbarConfig {
       const { sub, email } = this.userProfile;
       this.rollbar.configure({
         enabled: !this.optOut,
-        codeVersion: VERSION,
-        code_version: VERSION,
+        codeVersion: this.version,
+        code_version: this.version,
+        checkIgnore: (isUncaught: boolean, args: LogArgument[], item: any) => {
+          try {
+            if (
+              item?.body?.trace?.exception?.description === 'Canceled' ||
+              item?.body?.trace?.exception?.class === 'ChunkLoadError' ||
+              item?.body?.trace?.exception?.class === '(unknown)' ||
+              item?.body?.trace?.frames?.[0]?.filename?.endsWith('/js/monaco/vs/loader.js')
+            ) {
+              return true;
+            }
+            return false;
+          } catch (ex) {
+            return false;
+          }
+        },
         payload: {
           server: {
             root: 'webpack:///./',
@@ -114,7 +119,7 @@ class RollbarConfig {
             javascript: {
               source_map_enabled: true,
               environment: this.environment,
-              code_version: VERSION,
+              code_version: this.version,
             },
           },
           person: {
@@ -138,6 +143,10 @@ class RollbarConfig {
   }
 }
 
+const FALLBACK = {
+  error: NOOP,
+};
+
 /**
  * Parameters are only required on initialization component
  * Anything else lower in the tree will be able to use without arguments
@@ -153,14 +162,18 @@ export function useRollbar(options?: RollbarProperties, optOut?: boolean): Rollb
     setRollbarConfig(RollbarConfig.getInstance(options, optOut));
   }, [options, optOut]);
 
-  return rollbarConfig.rollbar;
+  return rollbarConfig.rollbar || (FALLBACK as any);
 }
 
 // This should be used outside of a component (e.x. utility function)
-export function logErrorToRollbar(message: string, data?: any) {
+export function logErrorToRollbar(
+  message: string,
+  data?: any,
+  severity: 'log' | 'debug' | 'info' | 'warn' | 'error' | 'critical' = 'error'
+) {
   try {
     if (RollbarConfig.getInstance().rollbarIsConfigured) {
-      RollbarConfig.getInstance().rollbar.error(message, data);
+      RollbarConfig.getInstance().rollbar[severity](message, data);
     }
   } catch (ex) {
     // could not report to rollbar

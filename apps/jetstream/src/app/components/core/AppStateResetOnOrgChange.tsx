@@ -1,19 +1,22 @@
 import { SalesforceOrgUi } from '@jetstream/types';
-import React, { Fragment, FunctionComponent, useEffect, useState } from 'react';
+import {
+  fromAppState,
+  fromAutomationControlState,
+  fromDeployMetadataState,
+  fromFormulaState,
+  fromLoadRecordsState,
+  fromPermissionsState,
+  fromQueryState,
+} from '@jetstream/ui-core';
+import { FunctionComponent, useEffect, useState } from 'react';
 import { Resetter, useRecoilValue, useResetRecoilState } from 'recoil';
-import * as fromAppState from '../../app-state';
-import * as fromAutomationControlState from '../automation-control/automation-control.state';
-import * as fromDeployMetadataState from '../deploy/deploy-metadata.state';
-import * as fromLoadState from '../load-records/load-records.state';
-import * as fromPermissionsState from '../manage-permissions/manage-permissions.state';
-import * as fromQueryState from '../query/query.state';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface AppStateResetOnOrgChangeProps {}
 
 export const AppStateResetOnOrgChange: FunctionComponent<AppStateResetOnOrgChangeProps> = () => {
   const selectedOrg = useRecoilValue<SalesforceOrgUi>(fromAppState.selectedOrgState);
-  const [priorSelectedOrg, setPriorSelectedOrg] = useState<string>(null);
+  const [priorSelectedOrg, setPriorSelectedOrg] = useState<string | null>(null);
 
   const resetFns: Resetter[] = [
     // QUERY
@@ -32,9 +35,9 @@ export const AppStateResetOnOrgChange: FunctionComponent<AppStateResetOnOrgChang
     useResetRecoilState(fromQueryState.queryOrderByState),
     useResetRecoilState(fromQueryState.querySoqlState),
     // LOAD
-    useResetRecoilState(fromLoadState.sObjectsState),
-    useResetRecoilState(fromLoadState.selectedSObjectState),
-    useResetRecoilState(fromLoadState.fieldMappingState),
+    useResetRecoilState(fromLoadRecordsState.sObjectsState),
+    useResetRecoilState(fromLoadRecordsState.selectedSObjectState),
+    useResetRecoilState(fromLoadRecordsState.fieldMappingState),
     // AUTOMATION-CONTROL
     useResetRecoilState(fromAutomationControlState.sObjectsState),
     // Manage Permissions
@@ -48,6 +51,7 @@ export const AppStateResetOnOrgChange: FunctionComponent<AppStateResetOnOrgChang
     useResetRecoilState(fromPermissionsState.fieldsByKey),
     useResetRecoilState(fromPermissionsState.objectPermissionMap),
     useResetRecoilState(fromPermissionsState.fieldPermissionMap),
+    useResetRecoilState(fromPermissionsState.tabVisibilityPermissionMap),
     // Deploy
     useResetRecoilState(fromDeployMetadataState.metadataItemsState),
     useResetRecoilState(fromDeployMetadataState.metadataItemsMapState),
@@ -56,6 +60,14 @@ export const AppStateResetOnOrgChange: FunctionComponent<AppStateResetOnOrgChang
     useResetRecoilState(fromDeployMetadataState.metadataSelectionTypeState),
     useResetRecoilState(fromDeployMetadataState.changesetPackage),
     useResetRecoilState(fromDeployMetadataState.changesetPackages),
+    // Formula
+    useResetRecoilState(fromFormulaState.sourceTypeState),
+    useResetRecoilState(fromFormulaState.selectedSObjectState),
+    useResetRecoilState(fromFormulaState.selectedFieldState),
+    useResetRecoilState(fromFormulaState.recordIdState),
+    useResetRecoilState(fromFormulaState.formulaValueState),
+    useResetRecoilState(fromFormulaState.numberNullBehaviorState),
+    useResetRecoilState(fromFormulaState.bannerDismissedState),
   ];
 
   useEffect(() => {
@@ -68,7 +80,7 @@ export const AppStateResetOnOrgChange: FunctionComponent<AppStateResetOnOrgChang
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrg, priorSelectedOrg]);
 
-  return <Fragment />;
+  return null;
 };
 
 export default AppStateResetOnOrgChange;

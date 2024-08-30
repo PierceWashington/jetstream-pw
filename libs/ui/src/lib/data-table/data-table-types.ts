@@ -1,10 +1,38 @@
-import { MapOf, SalesforceOrgUi } from '@jetstream/types';
+import { Maybe, SalesforceOrgUi } from '@jetstream/types';
 import { Column } from 'react-data-grid';
 
 export type RowWithKey = Record<string, any> & { _key: string };
-export type ColumnType = 'text' | 'number' | 'subquery' | 'object' | 'location' | 'date' | 'time' | 'boolean' | 'address' | 'salesforceId';
+export type RowSalesforceRecordWithKey = RowWithKey & {
+  _action: (row: RowWithKey, action: 'view' | 'edit' | 'clone' | 'apex') => void;
+  _idx: number;
+  _record: Record<string, any>;
+  _touchedColumns: Set<string>;
+  _saveError?: Maybe<string>;
+};
+export type ColumnType =
+  | 'text'
+  | 'number'
+  | 'subquery'
+  | 'object'
+  | 'location'
+  | 'date'
+  | 'time'
+  | 'boolean'
+  | 'address'
+  | 'salesforceId'
+  | 'textOrSalesforceId';
 export type FilterType = 'TEXT' | 'NUMBER' | 'DATE' | 'TIME' | 'SET' | 'BOOLEAN_SET';
 export const FILTER_SET_TYPES = new Set<FilterType>(['SET', 'BOOLEAN_SET']);
+
+export interface DataTableRef<T> {
+  hasSortApplied: () => boolean;
+  getFilteredAndSortedRows: () => readonly T[];
+  hasReorderedColumns: () => boolean;
+  /** Takes into account re-ordered columns */
+  getCurrentColumns: () => ColumnWithFilter<T>[];
+  /** Takes into account re-ordered columns */
+  getCurrentColumnNames: () => string[];
+}
 
 export type DataTableFilter =
   | DataTableTextFilter
@@ -27,7 +55,7 @@ export interface DataTableNumberFilter {
 
 export interface DataTableDateFilter {
   type: 'DATE';
-  value: string;
+  value: string | null;
   comparator: 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN';
 }
 
@@ -49,15 +77,13 @@ export interface DataTableBooleanSetFilter {
 
 export interface ColumnWithFilter<TRow, TSummaryRow = unknown> extends Column<TRow, TSummaryRow> {
   /** getValue is used when filtering or sorting rows */
-  readonly getValue?: (params: { row: TRow; column: ColumnWithFilter<TRow, unknown> }) => string;
+  readonly getValue?: (params: { row: TRow; column: ColumnWithFilter<TRow, unknown> }) => string | null;
   readonly filters?: FilterType[];
-  /** If column reordering is enabled for a table, prevent column from reorder */
-  readonly preventReorder?: boolean;
 }
 
 export interface SalesforceQueryColumnDefinition<TRow, TSummaryRow = unknown> {
   parentColumns: ColumnWithFilter<TRow, TSummaryRow>[];
-  subqueryColumns: MapOf<ColumnWithFilter<TRow, TSummaryRow>[]>;
+  subqueryColumns: Record<string, ColumnWithFilter<TRow, TSummaryRow>[]>;
 }
 
 export interface FilterContextProps {
@@ -70,9 +96,11 @@ export interface FilterContextProps {
 
 export interface SubqueryContext<TRow = any> {
   serverUrl: string;
+  skipFrontdoorLogin: boolean;
   org: SalesforceOrgUi;
   isTooling: boolean;
-  columnDefinitions: MapOf<ColumnWithFilter<TRow, unknown>[]>;
+  columnDefinitions?: Record<string, ColumnWithFilter<TRow, unknown>[]>;
+  onSubqueryFieldReorder?: (columnKey: string, fields: string[], columnOrder: number[]) => void;
   google_apiKey: string;
   google_appId: string;
   google_clientId: string;
@@ -99,3 +127,21 @@ export interface SalesforceAddressField {
   StateCode?: string;
   street?: string;
 }
+
+export type ContextAction =
+  | 'COPY_CELL'
+  | 'COPY_ROW_EXCEL'
+  | 'COPY_ROW_JSON'
+  | 'COPY_COL'
+  | 'COPY_COL_JSON'
+  | 'COPY_COL_NO_HEADER'
+  | 'COPY_TABLE'
+  | 'COPY_TABLE_JSON';
+
+export type ContextMenuActionData<T> = {
+  row: T;
+  rows: T[];
+  rowIdx: number;
+  column: ColumnWithFilter<T, unknown>;
+  columns: ColumnWithFilter<T, unknown>[];
+};

@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
+import { logger } from '@jetstream/shared/client-logger';
 import { MIME_TYPES } from '@jetstream/shared/constants';
 import { getFilename, isEnterKey, prepareCsvFile, prepareExcelFile, saveFile } from '@jetstream/shared/ui-utils';
 import {
@@ -8,17 +8,17 @@ import {
   FileExtCsv,
   FileExtCsvXLSX,
   FileExtGDrive,
+  FileExtJson,
   FileExtXLSX,
   FileExtXml,
   FileExtZip,
   JetstreamEvents,
-  MapOf,
+  Maybe,
   MimeType,
   SalesforceOrgUi,
   UploadToGoogleJob,
 } from '@jetstream/types';
-import FileDownloadGoogle from './options/FileDownloadGoogle';
-import { isString } from 'lodash';
+import isString from 'lodash/isString';
 import { Fragment, FunctionComponent, KeyboardEvent, useEffect, useRef, useState } from 'react';
 import Input from '../form/input/Input';
 import Radio from '../form/radio/Radio';
@@ -32,7 +32,20 @@ import {
   RADIO_FORMAT_XML,
   RADIO_FORMAT_ZIP,
 } from './download-modal-utils';
-import { logger } from '@jetstream/shared/client-logger';
+import FileDownloadGoogle from './options/FileDownloadGoogle';
+
+type TransformDataParams = TransformDataCsvXlsx | TransformDataJson;
+
+interface TransformDataCsvXlsx {
+  fileFormat: FileExtCsv | FileExtXLSX;
+  data: any[];
+  header: string[];
+}
+
+interface TransformDataJson {
+  fileFormat: FileExtJson;
+  data: any[];
+}
 
 export interface FileDownloadModalProps {
   google_apiKey?: string;
@@ -40,19 +53,36 @@ export interface FileDownloadModalProps {
   google_clientId?: string;
   modalHeader?: string;
   modalTagline?: string;
-  allowedTypes?: FileExtAllTypes[]; // defaults to all types
+  allowedTypes?: FileExtAllTypes[];
   org: SalesforceOrgUi;
-  // if data is MapOf<any[]> | ArrayBuffer then only excel is a supported option and header, if provided, should be the same type
-  data: any[] | MapOf<any[]> | ArrayBuffer | string;
-  header?: string[] | MapOf<any[]>; // can be omitted if every field should be included in download, otherwise pass in a list of fields to include in file
+  /**
+   * if data is Record<string, any[]> | ArrayBuffer then only excel is a supported option and header, if provided, should be the same type
+   */
+  data: any[] | Record<string, any[]> | ArrayBuffer | string;
+  /**
+   * Header to use for download.
+   * If omitted, then this will be auto-detected from the first row of data
+   */
+  header?: string[] | Record<string, any[]>;
+  /**
+   * Words to combine into the filename
+   */
   fileNameParts?: string[];
   alternateDownloadButton?: React.ReactNode; // If provided, then caller must manage what happens on click - used for URL links
   onModalClose: (cancelled?: boolean) => void;
   // TODO: we may want to provide a hook "onPrepareDownload" to override default file generation process
-  // this may be useful if alternateDownloadButton is provided, otherwise this usually is not required
+  /** this may be useful if alternateDownloadButton is provided, otherwise this usually is not required */
   onChange?: (data: { fileName: string; fileFormat: FileExtAllTypes }) => void;
   emitUploadToGoogleEvent?: (event: JetstreamEvents) => void;
   onError?: (error: Error) => void;
+  /**
+   * Optional Transformation to apply to simple data
+   * SPECIAL USAGE: This will only be called if the data is an array, other complex types will not be ignored
+   *
+   * example usage is if the spreadsheet format vs JSON should have different output
+   * (e.x. flattened data vs nested data)
+   */
+  transformData?: (params: TransformDataParams) => any[];
 }
 
 const defaultAllowedTypes = [RADIO_FORMAT_XLSX, RADIO_FORMAT_CSV, RADIO_FORMAT_JSON];
@@ -73,6 +103,7 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
   onChange,
   emitUploadToGoogleEvent,
   onError,
+  transformData,
 }) => {
   const hasGoogleInputConfigured = !!google_apiKey && !!google_appId && !!google_clientId && !!emitUploadToGoogleEvent;
   const [allowedTypesSet, setAllowedTypesSet] = useState<Set<string>>(() => new Set(allowedTypes));
@@ -80,10 +111,11 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
   const [fileName, setFileName] = useState<string>(getFilename(org, fileNameParts));
   // If the user changes the filename, we do not want to focus/select the text again or else the user cannot type
   const [doFocusInput, setDoFocusInput] = useState<boolean>(true);
-  const inputEl = useRef<HTMLInputElement>();
+  const inputEl = useRef<HTMLInputElement>(null);
   const [filenameEmpty, setFilenameEmpty] = useState(false);
 
-  const [googleFolder, setGoogleFolder] = useState<string>();
+  const [googleFolder, setGoogleFolder] = useState<Maybe<string>>(null);
+  const [isGooglePickerVisible, setIsGooglePickerVisible] = useState(false);
 
   useEffect(() => {
     if (!fileName && !filenameEmpty) {
@@ -110,8 +142,8 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
 
   useEffect(() => {
     if (doFocusInput) {
-      inputEl.current.focus();
-      inputEl.current.select();
+      inputEl.current?.focus();
+      inputEl.current?.select();
       setDoFocusInput(false);
     }
   }, [inputEl.current]);
@@ -140,21 +172,25 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
               fileData = data;
             } else if (Array.isArray(data)) {
               const headerFields = (header ? header : Object.keys(data[0])) as string[];
-              fileData = prepareExcelFile(data, headerFields);
+              const _data = transformData ? transformData({ fileFormat, data, header: headerFields }) : data;
+              fileData = prepareExcelFile(_data, headerFields);
             } else {
-              fileData = prepareExcelFile(data as any, header as MapOf<string[]>);
+              fileData = prepareExcelFile(data as any, header as Record<string, string[]>);
             }
             mimeType = MIME_TYPES.XLSX;
             break;
           }
           case 'csv': {
             const headerFields = (header ? header : Object.keys(data[0])) as string[];
-            fileData = prepareCsvFile(data as any[], headerFields);
+            const _data =
+              transformData && Array.isArray(data) ? transformData({ fileFormat, data: data, header: headerFields }) : (data as any[]);
+            fileData = prepareCsvFile(_data, headerFields);
             mimeType = MIME_TYPES.CSV;
             break;
           }
           case 'json': {
-            fileData = JSON.stringify(data, null, 2);
+            const _data = transformData && Array.isArray(data) ? transformData({ fileFormat, data: data }) : data;
+            fileData = JSON.stringify(_data, null, 2);
             mimeType = MIME_TYPES.JSON;
             break;
           }
@@ -191,16 +227,20 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
     if (allowedTypesSet.has('csv')) {
       fileType = 'csv';
       const headerFields = (header ? header : Object.keys(data[0])) as string[];
-      fileData = prepareCsvFile(data as any[], headerFields);
+      const _data =
+        transformData && Array.isArray(data) ? transformData({ fileFormat: 'csv', data, header: headerFields }) : (data as any[]);
+      fileData = prepareCsvFile(_data, headerFields);
     } else if (allowedTypesSet.has('xlsx')) {
       fileType = 'xlsx';
       if (data instanceof ArrayBuffer) {
         fileData = data;
       } else if (Array.isArray(data)) {
         const headerFields = (header ? header : Object.keys(data[0])) as string[];
-        fileData = prepareExcelFile(data, headerFields);
+        const _data =
+          transformData && Array.isArray(data) ? transformData({ fileFormat: 'xlsx', data: data, header: headerFields }) : (data as any[]);
+        fileData = prepareExcelFile(_data, headerFields);
       } else {
-        fileData = prepareExcelFile(data as any, header as MapOf<string[]>);
+        fileData = prepareExcelFile(data as any, header as Record<string, string[]>);
       }
     } else {
       fileType = 'zip';
@@ -211,10 +251,10 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
         type: 'UploadToGoogle',
         title: `Upload to Google`,
         org,
-        meta: { fileName, fileData, fileType, googleFolder: googleFolder },
+        meta: { fileName, fileData, fileType, googleFolder },
       },
     ];
-    emitUploadToGoogleEvent({ type: 'newJob', payload: jobs });
+    emitUploadToGoogleEvent && emitUploadToGoogleEvent({ type: 'newJob', payload: jobs });
     onModalClose();
   }
 
@@ -249,6 +289,7 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
         </Fragment>
       }
       skipAutoFocus
+      hide={isGooglePickerVisible}
       onClose={() => onModalClose(true)}
     >
       <div>
@@ -308,12 +349,13 @@ export const FileDownloadModal: FunctionComponent<FileDownloadModalProps> = ({
             />
           )}
         </RadioGroup>
-        {fileFormat === 'gdrive' && (
+        {fileFormat === 'gdrive' && google_apiKey && google_appId && google_clientId && (
           <FileDownloadGoogle
             google_apiKey={google_apiKey}
             google_appId={google_appId}
             google_clientId={google_clientId}
             onFolderSelected={handleFolderSelected}
+            onSelectorVisible={setIsGooglePickerVisible}
           />
         )}
         <Input

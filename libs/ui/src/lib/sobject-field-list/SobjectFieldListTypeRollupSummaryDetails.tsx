@@ -3,7 +3,7 @@ import { queryWithCache } from '@jetstream/shared/data';
 import { useRollbar } from '@jetstream/shared/ui-utils';
 import { FieldWrapper, SalesforceOrgUi } from '@jetstream/types';
 import copyToClipboard from 'copy-to-clipboard';
-import React, { Fragment, FunctionComponent, useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, FunctionComponent, useCallback, useEffect, useRef, useState } from 'react';
 import { Spinner } from '../..';
 import ErrorBoundaryWithoutContent from '../utils/ErrorBoundaryWithoutContent';
 import Icon from '../widgets/Icon';
@@ -33,8 +33,8 @@ export interface CustomField {
   };
 }
 
-function copy(value: string) {
-  copyToClipboard(value);
+function copy(value?: string) {
+  value && copyToClipboard(value);
 }
 
 const copyToClipboardMsg = (
@@ -48,7 +48,7 @@ const TooltipContent = ({
   field,
   onContent,
 }: SobjectFieldListTypeRollupSummaryDetailsProps & { onContent: (value: string) => void }) => {
-  const isMounted = useRef(null);
+  const isMounted = useRef(true);
   const rollbar = useRollbar();
   const [content, setContent] = useState<{ label: string; items: string[] }>();
   const [loading, setLoading] = useState(false);
@@ -76,9 +76,9 @@ const TooltipContent = ({
     if (!suffix) {
       suffix = developerName;
       developerName = namespace;
-      namespace = null;
+      namespace = '';
     }
-    let query: string;
+    let query: string | undefined = undefined;
     try {
       setLoading(true);
       query = `SELECT Id, Metadata FROM CustomField
@@ -143,13 +143,13 @@ export const SobjectFieldListTypeRollupSummaryDetails: FunctionComponent<Sobject
   field,
   org,
 }) => {
-  const [content, setContent] = useState<string>();
+  const [content, setContent] = useState<string | null>(null);
   return (
     <ErrorBoundaryWithoutContent>
       <Tooltip
         id={`${field.name}-type-tooltip`}
         content={<TooltipContent field={field} org={org} onContent={setContent} />}
-        onClick={() => copy(content)}
+        onClick={() => content && copy(content)}
       >
         <span className="slds-badge__icon slds-badge__icon_left slds-badge__icon_inverse">
           <Icon

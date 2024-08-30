@@ -1,22 +1,33 @@
+import { logger } from '@jetstream/shared/client-logger';
 import { describeSObject, genericRequest } from '@jetstream/shared/data';
-import { getMapOf, REGEX, splitArrayToMaxSize } from '@jetstream/shared/utils';
-import {
+import { REGEX, flattenRecords, groupByFlat, splitArrayToMaxSize } from '@jetstream/shared/utils';
+import type {
   CompositeRequestBody,
   CompositeResponse,
+  CopyAsDataType,
   DebugLevel,
+  DescribeSObjectResult,
   DescribeSObjectResultWithExtendedField,
+  Field,
   FieldWithExtendedType,
   FieldWrapper,
-  MapOf,
+  Maybe,
   QueryFields,
   SalesforceOrgUi,
   UserTrace,
 } from '@jetstream/types';
-import addHours from 'date-fns/addHours';
-import formatISO from 'date-fns/formatISO';
-import { DescribeSObjectResult, Field } from 'jsforce';
-import { composeQuery, getField } from 'soql-parser-js';
-import { polyfillFieldDefinition, sortQueryFields } from './shared-ui-utils';
+import { composeQuery, getField } from '@jetstreamapp/soql-parser-js';
+import copyToClipboard from 'copy-to-clipboard';
+import { addHours } from 'date-fns/addHours';
+import { formatISO } from 'date-fns/formatISO';
+import { unparse } from 'papaparse';
+import {
+  isRelationshipField,
+  polyfillFieldDefinition,
+  sortQueryFields,
+  transformTabularDataToExcelStr,
+  transformTabularDataToHtml,
+} from './shared-ui-utils';
 
 export function buildQuery(sObject: string, fields: string[]) {
   return composeQuery({ sObject, fields: fields.map((field) => getField(field)) }, { format: true });
@@ -80,16 +91,15 @@ export function fetchFieldsProcessResults(
   parentKey: string
 ): QueryFields {
   const { sobject } = queryFields;
-  const isCustomMetadata = sobject.endsWith('__mdt');
 
   const childRelationships = describeResults.childRelationships.filter((relationship) => !!relationship.relationshipName);
-  const fields: MapOf<FieldWrapper> = getMapOf(
+  const fields: Record<string, FieldWrapper> = groupByFlat(
     describeResults.fields.map((field: Field & { typeLabel: string }) => {
       const type = field.typeLabel;
 
       const filterText = `${field.name || ''}${field.label || ''}${type}${type.replace(REGEX.NOT_ALPHA, '')}`.toLowerCase();
-      let relatedSobject: string | string[];
-      if (field.type === 'reference' && field.relationshipName && field.referenceTo?.length) {
+      let relatedSobject: string | string[] | undefined = undefined;
+      if (isRelationshipField(field) && field?.referenceTo?.length) {
         if (field.referenceTo.length === 1) {
           relatedSobject = field.referenceTo[0];
         } else {
@@ -110,8 +120,7 @@ export function fetchFieldsProcessResults(
         relatedSobject,
         filterText,
         metadata: field,
-        relationshipKey:
-          field.type === 'reference' && field.relationshipName && field.referenceTo?.length ? getFieldKey(parentKey, field) : undefined,
+        relationshipKey: isRelationshipField(field) ? getFieldKey(parentKey, field) : undefined,
       };
     }),
     'name'
@@ -165,7 +174,7 @@ export async function makeToolingRequests<T>(
   allOrNone = false
 ): Promise<CompositeResponse<T>> {
   const compositeRequestSets = splitArrayToMaxSize(compositeRequests, 25);
-  let results: CompositeResponse<T>;
+  let results: CompositeResponse<T> = { compositeResponse: [] };
   for (const compositeRequest of compositeRequestSets) {
     const response = await genericRequest<CompositeResponse<T>>(selectedOrg, {
       isTooling: true,
@@ -285,4 +294,50 @@ export async function fetchActiveLog(org: SalesforceOrgUi, id: string): Promise<
     options: { responseType: 'text' },
   });
   return fetchResults;
+}
+
+/**
+ * Copy records to clipboard in various formats
+ * Copy the content in both plain text and HTML to be compatible with pasting to excel
+ * along with other applications at the same time
+ */
+export async function copyRecordsToClipboard(
+  recordsToCopy: any,
+  copyFormat: CopyAsDataType = 'excel',
+  fields?: Maybe<string[]>,
+  includeHeader = true
+) {
+  try {
+    if (copyFormat === 'excel') {
+      recordsToCopy = fields ? flattenRecords(recordsToCopy, fields) : recordsToCopy;
+      const clipboardItem = new ClipboardItem({
+        'text/plain': new Blob([transformTabularDataToExcelStr(recordsToCopy, fields, includeHeader)], { type: 'text/plain' }),
+        'text/html': new Blob([transformTabularDataToHtml(recordsToCopy, fields, includeHeader)], { type: 'text/html' }),
+      });
+      await navigator.clipboard.write([clipboardItem]);
+    } else if (copyFormat === 'csv') {
+      recordsToCopy = fields ? flattenRecords(recordsToCopy, fields) : recordsToCopy;
+      const clipboardItem = new ClipboardItem({
+        'text/plain': new Blob([unparse(recordsToCopy, { header: includeHeader })], { type: 'text/plain' }),
+      });
+      await navigator.clipboard.write([clipboardItem]);
+    } else if (copyFormat === 'json') {
+      const clipboardItem = new ClipboardItem({
+        'text/plain': new Blob([JSON.stringify(recordsToCopy, null, 2)], { type: 'text/plain' }),
+      });
+      await navigator.clipboard.write([clipboardItem]);
+    }
+    logger.info('[Clipboard][Copied]', { recordsToCopy });
+  } catch (ex) {
+    logger.warn('Copy to clipboard failed, trying fallback', ex.message);
+    if (copyFormat === 'excel' && fields) {
+      const flattenedData = flattenRecords(recordsToCopy, fields);
+      copyToClipboard(transformTabularDataToExcelStr(flattenedData, fields, includeHeader), { format: 'text/plain' });
+    } else if (copyFormat === 'csv' && fields) {
+      const flattenedData = flattenRecords(recordsToCopy, fields);
+      copyToClipboard(unparse(flattenedData, { header: includeHeader }), { format: 'text/plain' });
+    } else if (copyFormat === 'json') {
+      copyToClipboard(JSON.stringify(recordsToCopy, null, 2), { format: 'text/plain' });
+    }
+  }
 }

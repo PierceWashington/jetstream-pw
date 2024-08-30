@@ -1,13 +1,16 @@
+import { css } from '@emotion/react';
 import { IconObj } from '@jetstream/icon-factory';
+import { Maybe } from '@jetstream/types';
 import classNames from 'classnames';
 import isString from 'lodash/isString';
-import React, { forwardRef, ReactNode } from 'react';
+import { forwardRef, ReactNode } from 'react';
+import Grid from '../grid/Grid';
 import Icon from '../widgets/Icon';
 
 export interface CardProps {
   testId?: string;
   className?: string;
-  bodyClassName?: string;
+  bodyClassName?: Maybe<string>;
   title?: string | ReactNode;
   icon?: IconObj;
   actions?: ReactNode;
@@ -27,7 +30,12 @@ export const Card = forwardRef<HTMLElement, CardProps>(
       <article data-testid={testId} className={classNames('slds-card', { 'slds-card_boundary': nestedBorder }, className)} ref={ref}>
         {title && (
           <div className="slds-card__header slds-grid">
-            <header className={classNames('slds-media slds-media_center slds-has-flexi-truncate')}>
+            <header
+              className={classNames('slds-media slds-media_center slds-has-flexi-truncate')}
+              css={css`
+                flex-wrap: wrap;
+              `}
+            >
               {icon && (
                 <div className="slds-media__figure">
                   <Icon
@@ -35,15 +43,29 @@ export const Card = forwardRef<HTMLElement, CardProps>(
                     icon={icon.icon}
                     title={icon.title}
                     description={icon.description}
-                    containerClassname={classNames('slds-icon_container', `slds-icon-${icon.type}-${icon.icon.replace('_', '-')}`)}
+                    containerClassname={classNames('slds-icon_container', `slds-icon-${icon.type}-${icon.icon.replaceAll('_', '-')}`)}
                     className="slds-icon slds-icon_small"
                   />
                 </div>
               )}
-              <div className="slds-media__body">
+              <div
+                className="slds-media__body"
+                css={css`
+                  min-width: fit-content;
+                `}
+              >
                 <h2 className="slds-card__header-title">{titleContent}</h2>
               </div>
-              {actions && actions}
+              {actions && (
+                <Grid
+                  wrap
+                  css={css`
+                    margin-left: auto;
+                  `}
+                >
+                  {actions}
+                </Grid>
+              )}
             </header>
           </div>
         )}

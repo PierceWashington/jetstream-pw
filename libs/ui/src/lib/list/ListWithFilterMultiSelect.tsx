@@ -1,14 +1,15 @@
 import { css } from '@emotion/react';
 import { formatNumber } from '@jetstream/shared/ui-utils';
-import { multiWordObjectFilter, NOOP, orderStringsBy, pluralizeIfMultiple } from '@jetstream/shared/utils';
-import { ListItem as ListItemType, UpDown } from '@jetstream/types';
-import { FishIllustration } from '../illustrations/FishIllustration';
+import { multiWordObjectFilter, NOOP, orderValues, pluralizeIfMultiple } from '@jetstream/shared/utils';
+import { ListItem as ListItemType, Maybe, UpDown } from '@jetstream/types';
+import uniqueId from 'lodash/uniqueId';
 import { createRef, Fragment, FunctionComponent, useEffect, useState } from 'react';
 import Checkbox from '../form/checkbox/Checkbox';
 import SearchInput from '../form/search-input/SearchInput';
 import Grid from '../grid/Grid';
 import EmptyState from '../illustrations/EmptyState';
-import AutoFullHeightContainer from '../layout/AutoFullHeightContainer';
+import { FishIllustration } from '../illustrations/FishIllustration';
+import AutoFullHeightContainer, { AutoFullHeightContainerProps } from '../layout/AutoFullHeightContainer';
 import Icon from '../widgets/Icon';
 import ItemSelectionSummary from '../widgets/ItemSelectionSummary';
 import Spinner from '../widgets/Spinner';
@@ -22,14 +23,16 @@ export interface ListWithFilterMultiSelectProps {
     descriptorSingular: string; // item -> showing x of x {items} || x {items} selected
     descriptorPlural: string; // items
   };
-  items: ListItemType[];
+  items: Maybe<ListItemType[]>;
   selectedItems: string[];
   allowSelectAll?: boolean;
-  // disabled?: boolean;
+  disabled?: boolean;
   loading?: boolean;
   hasError?: boolean;
   allowRefresh?: boolean;
   lastRefreshed?: string;
+  autoFillContainerProps?: AutoFullHeightContainerProps;
+  portalRef?: Element;
   onSelected: (items: string[]) => void;
   errorReattempt?: () => void;
   onRefresh?: () => void;
@@ -44,19 +47,22 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
   items,
   selectedItems = [],
   allowSelectAll = true,
-  // disabled = false, // TODO:
+  disabled = false,
   loading = false,
   hasError,
   allowRefresh,
   lastRefreshed,
+  autoFillContainerProps,
+  portalRef,
   onSelected,
   errorReattempt,
   onRefresh = NOOP,
 }) => {
   const [selectedItemsSet, setSelectedItemsSet] = useState<Set<string>>(new Set<string>(selectedItems || []));
   const [searchTerm, setSearchTerm] = useState('');
-  const [filteredItems, setFilteredItems] = useState<ListItemType[]>(() => {
-    if (items?.length > 0 && searchTerm) {
+  const [id] = useState(() => uniqueId(`select-all-${labels.descriptorSingular}-multi`));
+  const [filteredItems, setFilteredItems] = useState<Maybe<ListItemType[]>>(() => {
+    if (items && items.length > 0 && searchTerm) {
       return items.filter(multiWordObjectFilter(['label', 'secondaryLabel'], searchTerm));
     }
     return items;
@@ -65,7 +71,7 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
   const ulRef = createRef<HTMLUListElement>();
 
   useEffect(() => {
-    if (items?.length > 0 && searchTerm) {
+    if (items && items.length > 0 && searchTerm) {
       setFilteredItems(items.filter(multiWordObjectFilter(['label', 'secondaryLabel'], searchTerm)));
     } else {
       setFilteredItems(items);
@@ -87,11 +93,14 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
       selectedItemsSet.delete(itemId);
       onSelected(Array.from(selectedItemsSet));
     } else {
-      onSelected(orderStringsBy(Array.from(selectedItemsSet).concat(itemId)));
+      onSelected(orderValues(Array.from(selectedItemsSet).concat(itemId)));
     }
   }
 
   function handleSelectAll(value: boolean) {
+    if (!filteredItems) {
+      return;
+    }
     filteredItems.forEach((item) => {
       if (value) {
         selectedItemsSet.add(item.id);
@@ -99,7 +108,7 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
         selectedItemsSet.delete(item.id);
       }
     });
-    onSelected(orderStringsBy(Array.from(selectedItemsSet)));
+    onSelected(orderValues(Array.from(selectedItemsSet)));
   }
 
   return (
@@ -110,7 +119,7 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
             <Grid>
               <h2 className="slds-text-heading_medium slds-grow slds-text-align_center">{labels.listHeading}</h2>
               <div>
-                <Tooltip id={`sobject-list-refresh-tooltip`} content={lastRefreshed}>
+                <Tooltip id={`sobject-list-refresh-tooltip`} content={lastRefreshed || ''}>
                   <button className="slds-button slds-button_icon slds-button_icon-container" disabled={loading} onClick={onRefresh}>
                     <Icon
                       type="utility"
@@ -131,7 +140,7 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
           )}
         </Fragment>
       )}
-      {loading && !items && (
+      {loading && (
         <div
           className="slds-is-relative"
           css={css`
@@ -168,7 +177,7 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
               {allowSelectAll && (
                 <div className="slds-text-body_small slds-text-color_weak slds-p-left--xx-small">
                   <Checkbox
-                    id={`select-all-${labels.descriptorSingular}-multi`}
+                    id={id}
                     checked={
                       filteredItems.length !== 0 &&
                       selectedItemsSet.size >= filteredItems.length &&
@@ -176,17 +185,19 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
                     }
                     label="Select All"
                     onChange={handleSelectAll}
-                    disabled={filteredItems.length === 0}
+                    disabled={disabled || filteredItems.length === 0}
                   />
                   <ItemSelectionSummary
                     items={items.filter((item) => selectedItemsSet.has(item.id)).map((item) => ({ label: item.label, value: item.id }))}
+                    portalRef={portalRef}
+                    disabled={disabled}
                     onClearAll={() => onSelected([])}
                     onClearItem={handleSelection}
                   />
                 </div>
               )}
             </div>
-            <AutoFullHeightContainer bottomBuffer={15}>
+            <AutoFullHeightContainer bottomBuffer={15} {...autoFillContainerProps}>
               <List
                 ref={ulRef}
                 items={filteredItems}
@@ -200,11 +211,12 @@ export const ListWithFilterMultiSelect: FunctionComponent<ListWithFilterMultiSel
                 })}
                 searchTerm={searchTerm}
                 highlightText
+                disabled={disabled}
               />
-              {!items.length && (
+              {!loading && !items.length && (
                 <EmptyState headline={`There are no ${labels.descriptorPlural}`} illustration={<FishIllustration />}></EmptyState>
               )}
-              {!!items.length && !filteredItems.length && (
+              {!loading && !!items.length && !filteredItems.length && (
                 <EmptyState headline={`There are no matching ${labels.descriptorPlural}`} subHeading="Adjust your selection."></EmptyState>
               )}
             </AutoFullHeightContainer>

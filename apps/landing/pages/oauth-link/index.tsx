@@ -1,5 +1,5 @@
 import Head from 'next/head';
-import React, { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import Footer from '../../components/Footer';
 import HeaderNoNavigation from '../../components/HeaderNoNavigation';
 import { parseQueryString } from '../../utils/utils';
@@ -57,7 +57,7 @@ const STATUS_MAP: StatusMap = {
  */
 function LinkAuthAccount() {
   const [hasError, setHasError] = useState(false);
-  const [errorHeading, setErrorHeading] = useState<string>();
+  const [errorHeading, setErrorHeading] = useState<string | null>(null);
   const [status, setStatus] = useState('Your request is being processed, please wait.');
 
   useEffect(() => {
@@ -136,7 +136,7 @@ function LinkAuthAccount() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  support@getjetstream.app
+                  {email}
                 </a>
                 .
               </p>

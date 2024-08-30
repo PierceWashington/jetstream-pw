@@ -1,9 +1,9 @@
 import { css } from '@emotion/react';
 import { MIME_TYPES } from '@jetstream/shared/constants';
 import { formatNumber, saveFile, useNonInitialEffect } from '@jetstream/shared/ui-utils';
-import { FieldWrapper, MapOf, QueryFields, SalesforceOrgUi, UpDown } from '@jetstream/types';
+import { FieldWrapper, QueryFields, SalesforceOrgUi, UpDown } from '@jetstream/types';
 import isString from 'lodash/isString';
-import { createRef, Fragment, FunctionComponent, useEffect, useState } from 'react';
+import { Fragment, FunctionComponent, createRef, useEffect, useState } from 'react';
 import Checkbox from '../form/checkbox/Checkbox';
 import DropDown from '../form/dropdown/DropDown';
 import SearchInput from '../form/search-input/SearchInput';
@@ -13,9 +13,16 @@ import List from '../list/List';
 import Icon from '../widgets/Icon';
 import SalesforceLogin from '../widgets/SalesforceLogin';
 import Spinner from '../widgets/Spinner';
-import { filterFieldsFn, getBgColor } from './sobject-field-list-utils';
 import { DEFAULT_FILTER_TYPES, FilterTypes, SobjectFieldListFilter } from './SobjectFieldListFilterNew';
 import SobjectFieldListItem from './SobjectFieldListItem';
+import { filterFieldsFn, getBgColor } from './sobject-field-list-utils';
+
+function getFilteredFields(visibleFields: Set<string>, queryFields: QueryFields, activeFilters: FilterTypes) {
+  return Array.from(visibleFields)
+    .map((key) => queryFields?.fields?.[key])
+    .filter(Boolean)
+    .filter(filterFieldsFn(activeFilters, queryFields.selectedFields)) as FieldWrapper[];
+}
 
 export interface SobjectFieldListProps {
   org: SalesforceOrgUi;
@@ -23,7 +30,7 @@ export interface SobjectFieldListProps {
   isTooling: boolean;
   level: number;
   itemKey: string;
-  queryFieldsMap: MapOf<QueryFields>;
+  queryFieldsMap: Record<string, QueryFields>;
   sobject: string;
   onToggleExpand: (key: string, field: FieldWrapper, relatedSobject: string) => void;
   onSelectField: (key: string, field: FieldWrapper) => void;
@@ -48,7 +55,7 @@ export const SobjectFieldList: FunctionComponent<SobjectFieldListProps> = ({
   onUnselectAll,
   errorReattempt,
 }) => {
-  const [queryFields, setQueryFields] = useState<QueryFields>(() => {
+  const [queryFields, setQueryFields] = useState<QueryFields | null>(() => {
     if (isString(itemKey) && queryFieldsMap[itemKey]) {
       return queryFieldsMap[itemKey];
     }
@@ -56,25 +63,21 @@ export const SobjectFieldList: FunctionComponent<SobjectFieldListProps> = ({
   });
   const [fieldLength, setFieldLength] = useState<number>(() => {
     if (isString(itemKey) && queryFieldsMap[itemKey]) {
-      return Object.keys(queryFieldsMap[itemKey]).length;
+      return Object.keys(queryFieldsMap[itemKey].fields).length;
     }
     return 0;
   });
   const [activeFilters, setActiveFilters] = useState<FilterTypes>({ ...DEFAULT_FILTER_TYPES });
-  const [filteredFields, setFilteredFields] = useState<FieldWrapper[]>(() => {
+  const [filteredFields, setFilteredFields] = useState<FieldWrapper[] | null>(() => {
     if (isString(itemKey) && queryFieldsMap[itemKey] && queryFieldsMap[itemKey].visibleFields) {
+      //
       return Array.from(queryFieldsMap[itemKey].visibleFields)
         .map((key) => queryFieldsMap[itemKey].fields[key])
-        .filter(filterFieldsFn(activeFilters));
+        .filter(filterFieldsFn(activeFilters, queryFields?.selectedFields));
     }
     return null;
   });
-  const [visibleFields, setVisibleFields] = useState<Set<string>>(() => {
-    if (isString(itemKey) && queryFieldsMap[itemKey]) {
-      return queryFieldsMap[itemKey].visibleFields;
-    }
-    return null;
-  });
+
   const [selectAll, setSelectAll] = useState<boolean>(false);
   const [searchInputId] = useState(`object-field-${sobject}-filter-${Date.now()}`);
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -85,24 +88,14 @@ export const SobjectFieldList: FunctionComponent<SobjectFieldListProps> = ({
       const queryFields = queryFieldsMap[itemKey];
       setQueryFields(queryFields);
       setFieldLength(Object.keys(queryFields.fields).length);
-      setVisibleFields(queryFields.visibleFields); // instance only changes if filtered fields was actually modified
+      setFilteredFields(getFilteredFields(queryFields.visibleFields, queryFields, activeFilters));
     }
-  }, [itemKey, queryFieldsMap]);
-
-  useNonInitialEffect(() => {
-    if (visibleFields) {
-      setFilteredFields(
-        Array.from(visibleFields)
-          .map((key) => queryFields.fields[key])
-          .filter(filterFieldsFn(activeFilters))
-      );
-    }
-  }, [visibleFields, activeFilters, queryFields?.fields]);
+  }, [activeFilters, itemKey, queryFieldsMap]);
 
   // when filtered fields changes, see if handleFieldFilterChanged fields are selected and possibly update allSelected state
   useEffect(() => {
-    if (filteredFields?.length > 0) {
-      const allSelected = filteredFields.every((field) => queryFields.selectedFields.has(field.name));
+    if (filteredFields && filteredFields?.length > 0) {
+      const allSelected = filteredFields.every((field) => queryFields?.selectedFields.has(field.name));
       if (allSelected !== selectAll) {
         setSelectAll(allSelected);
       }
@@ -113,19 +106,15 @@ export const SobjectFieldList: FunctionComponent<SobjectFieldListProps> = ({
   // When select all is explicitly modified, update field selection for visible fields
   function updateSelectAll(value: boolean) {
     setSelectAll(value);
-    onSelectAll(
-      itemKey,
-      value,
-      filteredFields.map((field) => field.name)
-    );
+    onSelectAll(itemKey, value, filteredFields?.map((field) => field.name) || []);
   }
 
   function isFieldActive(field: FieldWrapper) {
-    return queryFields.selectedFields.has(field.name);
+    return queryFields?.selectedFields.has(field.name) || false;
   }
 
   function handleFieldSelected(fieldName: string) {
-    onSelectField(itemKey, queryFields.fields[fieldName]);
+    queryFields?.fields[fieldName] && onSelectField(itemKey, queryFields.fields[fieldName]);
   }
 
   function getFieldContent(item: FieldWrapper) {
@@ -169,7 +158,7 @@ export const SobjectFieldList: FunctionComponent<SobjectFieldListProps> = ({
   }
 
   function handleDownloadMetadata() {
-    saveFile(JSON.stringify(queryFields.metadata, null, 2), `object-metadata-${sobject}.json`, MIME_TYPES.JSON);
+    queryFields && saveFile(JSON.stringify(queryFields.metadata, null, 2), `object-metadata-${sobject}.json`, MIME_TYPES.JSON);
   }
 
   return (
@@ -237,6 +226,7 @@ export const SobjectFieldList: FunctionComponent<SobjectFieldListProps> = ({
                 <SalesforceLogin
                   serverUrl={serverUrl}
                   org={org}
+                  skipFrontDoorAuth
                   returnUrl={`/lightning/setup/ObjectManager/${sobject}/Details/view`}
                   omitIcon
                   title={`View object in Salesforce setup`}
@@ -272,7 +262,7 @@ export const SobjectFieldList: FunctionComponent<SobjectFieldListProps> = ({
             onSelected={handleFieldSelected}
             getContent={getFieldContent}
           />
-          {!filteredFields.length && (
+          {!queryFields.loading && !filteredFields.length && (
             <EmptyState
               omitIllustration={level > 0}
               headline="There are no matching fields"

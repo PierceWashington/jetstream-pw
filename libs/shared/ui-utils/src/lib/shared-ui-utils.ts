@@ -1,27 +1,30 @@
 import { logger } from '@jetstream/shared/client-logger';
-import { HTTP } from '@jetstream/shared/constants';
+import { DATE_FORMATS, HTTP, INPUT_ACCEPT_FILETYPES } from '@jetstream/shared/constants';
 import {
   anonymousApex,
-  bulkApiGetJob,
   checkMetadataResults,
   checkMetadataRetrieveResults,
   checkMetadataRetrieveResultsAndDeployToTarget,
 } from '@jetstream/shared/data';
-import { delay, ensureBoolean, NOOP, orderObjectsBy, REGEX } from '@jetstream/shared/utils';
-import {
+import { NOOP, REGEX, delay, ensureBoolean, orderObjectsBy } from '@jetstream/shared/utils';
+import type {
   AndOr,
   BulkJobWithBatches,
   ChangeSet,
   DeployOptions,
   DeployResult,
+  DescribeGlobalSObjectResult,
+  DescribeSObjectResult,
   ErrorResult,
   ExpressionConditionRowSelectedItems,
   ExpressionConditionType,
   ExpressionGroupType,
   ExpressionType,
+  Field,
   ListItem,
-  MapOf,
+  Maybe,
   MimeType,
+  Nullable,
   PermissionSetRecord,
   PermissionSetWithProfileRecord,
   PositionAll,
@@ -33,27 +36,48 @@ import {
   UseReducerFetchAction,
   UseReducerFetchState,
 } from '@jetstream/types';
-import parseISO from 'date-fns/parseISO';
-import { saveAs } from 'file-saver';
-import { Field } from 'jsforce';
-import { get as safeGet, isFunction, isUndefined } from 'lodash';
-import isNil from 'lodash/isNil';
-import isString from 'lodash/isString';
-import numeral from 'numeral';
-import { parse as parseCsv, unparse, unparse as unparseCsv, UnparseConfig } from 'papaparse';
 import {
+  HavingClause,
+  HavingClauseWithRightCondition,
   LiteralType,
   Operator,
   ValueCondition,
+  ValueFunctionCondition,
   ValueWithDateLiteralCondition,
   WhereClause,
   WhereClauseWithRightCondition,
-} from 'soql-parser-js';
+} from '@jetstreamapp/soql-parser-js';
+import { parseISO } from 'date-fns/parseISO';
+import { saveAs } from 'file-saver';
+import safeGet from 'lodash/get';
+import isFunction from 'lodash/isFunction';
+import isNil from 'lodash/isNil';
+import isString from 'lodash/isString';
+import isUndefined from 'lodash/isUndefined';
+import numeral from 'numeral';
+import { UnparseConfig, parse as parseCsv, unparse, unparse as unparseCsv } from 'papaparse';
 import { Placement as tippyPlacement } from 'tippy.js';
 import * as XLSX from 'xlsx';
 
-export function formatNumber(number: number) {
-  return numeral(number).format('0,0');
+initXlsx(XLSX);
+
+/**
+ * Lazy load cpexcel since it appears it was failing to load for at least one user
+ * https://github.com/jetstreamapp/jetstream/issues/211
+ * https://git.sheetjs.com/sheetjs/sheetjs/issues/2900
+ */
+export function initXlsx(_xlsx: typeof import('xlsx')) {
+  import('xlsx/dist/cpexcel.full.mjs')
+    .then((module) => {
+      _xlsx.set_cptable(module);
+    })
+    .catch((ex) => {
+      // ignore error
+    });
+}
+
+export function formatNumber(number?: number) {
+  return numeral(number || 0).format('0,0');
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function parseQueryParams<T = any>(queryString: string): T {
@@ -66,7 +90,7 @@ export function parseQueryParams<T = any>(queryString: string): T {
 }
 
 export function parseCookie<T>(cookieName: string): T | null {
-  const cookieStrRegex: RegExpExecArray = RegExp(`${cookieName}[^;]+`).exec(document.cookie);
+  const cookieStrRegex: RegExpExecArray | null = RegExp(`${cookieName}[^;]+`).exec(document.cookie);
   const cookieStr = decodeURIComponent(cookieStrRegex ? cookieStrRegex.toString().replace(/^[^=]+./, '') : '');
   if (cookieStr.startsWith('j:')) {
     try {
@@ -86,10 +110,16 @@ export function eraseCookies() {
   });
 }
 
-export function sortQueryFields(fields: Field[]): Field[] {
+type FieldAccumulator<T> = {
+  id: Nullable<T>;
+  name: Nullable<T>;
+  remaining: T[];
+};
+
+export function sortQueryFields<T extends Pick<Field, 'name' | 'label'>>(fields: T[]): T[] {
   // partition name and id field out, then append to front
   const reducedFields = orderObjectsBy(fields, 'label').reduce(
-    (out, field) => {
+    (out: FieldAccumulator<T>, field) => {
       if (field.name === 'Id') {
         out.id = field;
       } else if (field.name === 'Name') {
@@ -106,7 +136,7 @@ export function sortQueryFields(fields: Field[]): Field[] {
     }
   );
 
-  const firstItems = [];
+  const firstItems: T[] = [];
   if (reducedFields.id) {
     firstItems.push(reducedFields.id);
   }
@@ -120,7 +150,7 @@ export function sortQueryFields(fields: Field[]): Field[] {
 export function sortQueryFieldsStr(fields: string[]): string[] {
   // partition name and id field out, then append to front
   const reducedFields = fields.reduce(
-    (out, field) => {
+    (out: FieldAccumulator<string>, field) => {
       if (field === 'Id') {
         out.id = field;
       } else if (field === 'Name') {
@@ -137,7 +167,7 @@ export function sortQueryFieldsStr(fields: string[]): string[] {
     }
   );
 
-  const firstItems = [];
+  const firstItems: string[] = [];
   if (reducedFields.id) {
     firstItems.push(reducedFields.id);
   }
@@ -189,8 +219,8 @@ export function sortQueryFieldsPolymorphicComparable(field1: QueryFieldWithPolym
     const bRoot = bParts.shift();
     if (aRoot === bRoot) {
       return sortQueryFieldsPolymorphicComparable(
-        { field: aParts.join('.'), polymorphicObj: field1.polymorphicObj },
-        { field: bParts.join('.'), polymorphicObj: field2.polymorphicObj }
+        { field: aParts.join('.'), polymorphicObj: field1.polymorphicObj } as any,
+        { field: bParts.join('.'), polymorphicObj: field2.polymorphicObj } as any
       );
     } else {
       if (a < b) {
@@ -204,6 +234,9 @@ export function sortQueryFieldsPolymorphicComparable(field1: QueryFieldWithPolym
 }
 
 export function polyfillFieldDefinition(field: Field): string {
+  if (!field) {
+    return '';
+  }
   const autoNumber: boolean = field.autoNumber;
   const { type, calculated, calculatedFormula, externalId, nameField, extraTypeInfo, length, precision, referenceTo, scale } = field;
   let prefix = '';
@@ -230,6 +263,9 @@ export function polyfillFieldDefinition(field: Field): string {
     value = `${length > 255 ? 'Long ' : ''}Text Area(${length})`;
   } else if (type === 'textarea' && extraTypeInfo === 'richtextarea') {
     value = `Rich Text Area(${length})`;
+  } else if (isRelationshipField(field)) {
+    // includes text/reference if referenceTo has data
+    value = `Lookup(${(referenceTo || []).join(',')})`;
   } else if (type === 'string') {
     value = `Text(${length})`;
   } else if (type === 'boolean') {
@@ -254,8 +290,6 @@ export function polyfillFieldDefinition(field: Field): string {
     value = `Percent(${precision}, ${scale})`;
   } else if (type === 'url') {
     value = `URL(${length})`;
-  } else if (type === 'reference') {
-    value = `Lookup(${(referenceTo || []).join(',')})`;
   } else {
     // Address, Email, Date, Time, picklist, phone
     value = `${type[0].toUpperCase()}${type.substring(1)}`;
@@ -272,7 +306,7 @@ export function polyfillFieldDefinition(field: Field): string {
  * @returns excel file
  */
 export function prepareExcelFile(data: any[], header?: string[], defaultSheetName?: string): ArrayBuffer;
-export function prepareExcelFile(data: MapOf<any[]>, header?: MapOf<string[]>, defaultSheetName?: void): ArrayBuffer;
+export function prepareExcelFile(data: Record<string, any[]>, header?: Record<string, string[]>, defaultSheetName?: void): ArrayBuffer;
 export function prepareExcelFile(data: any, header: any, defaultSheetName: any = 'Records'): ArrayBuffer {
   const workbook = XLSX.utils.book_new();
 
@@ -314,7 +348,7 @@ export function excelWorkbookToArrayBuffer(workbook: XLSX.WorkBook): ArrayBuffer
   return workbookArrayBuffer;
 }
 
-export function prepareCsvFile(data: MapOf<string>[], header: string[]): string {
+export function prepareCsvFile(data: Record<string, string>[], header: string[]): string {
   return unparse(
     {
       data,
@@ -353,7 +387,17 @@ export function saveFile(content: any, filename: string, type: MimeType) {
   saveAs(blob, filename);
 }
 
-export function base64ToArrayBuffer(base64: string) {
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+export function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0)).buffer;
 }
 
@@ -388,7 +432,7 @@ export function convertTippyPlacementToSlds(placement: tippyPlacement): Position
   }
 }
 
-function queryFilterHasValueValue(row: ExpressionConditionType) {
+export function queryFilterHasValue(row: ExpressionConditionType) {
   const hasValue = Array.isArray(row.selected.value) ? row.selected.value.length : !!row.selected.value;
   return (
     row.selected.operator &&
@@ -401,50 +445,53 @@ function isExpressionConditionType(value: any): value is ExpressionConditionType
   return !Array.isArray(value.rows);
 }
 
-export function convertFiltersToWhereClause(filters: ExpressionType): WhereClause {
+export function convertFiltersToWhereClause<T extends WhereClause | HavingClause>(filters: ExpressionType): T | undefined {
   if (!filters) {
     return;
   }
   logger.log({ filters });
 
   // Process all where clauses
-  const whereClauses = filters.rows.reduce((whereClauses: WhereClause[], row, i) => {
+  const whereOrHavingClauses = filters.rows.reduce((whereOrHavingClauses: T[], row, i) => {
     if (isExpressionConditionType(row)) {
-      if (queryFilterHasValueValue(row)) {
-        buildExpressionConditionWhereClause(whereClauses, row, filters.action);
+      if (queryFilterHasValue(row)) {
+        buildExpressionConditionWhereClause(whereOrHavingClauses, row, filters.action);
       }
     } else {
       const group = { ...row };
-      group.rows = group.rows.filter(queryFilterHasValueValue);
+      group.rows = group.rows.filter(queryFilterHasValue);
       if (group.rows.length > 0) {
-        buildExpressionGroupConditionWhereClause(whereClauses, group, filters.action);
+        buildExpressionGroupConditionWhereClause(whereOrHavingClauses, group, filters.action);
       }
     }
-    return whereClauses;
+    return whereOrHavingClauses;
   }, []);
 
-  if (!whereClauses.length) {
+  if (!whereOrHavingClauses.length) {
     return;
   }
 
   // combine all where clauses
-  const rootClause = whereClauses[0];
-  whereClauses.reduce((whereClause: WhereClauseWithRightCondition, currWhereClause, i) => {
-    if (whereClause) {
-      whereClause.right = currWhereClause;
+  const rootClause = whereOrHavingClauses[0];
+  whereOrHavingClauses.reduce((whereOrHavingClause: T, currClause, i) => {
+    if (whereOrHavingClause) {
+      // TODO: should have better types
+      (whereOrHavingClause as any).right = currClause;
       // use current operator as the prior operator (e.x. AND on this item applies to the prior item and this item)
       // whereClauses[i - 1].operator = currWhereClause.operator;
     }
     // if (i === whereClauses.length && currWhereClause.operator) {
     //   currWhereClause.operator = undefined;
     // }
-    return currWhereClause;
+    return currClause;
   });
 
   return rootClause;
 }
 
 export function getOperatorFromWhereClause(operator: Operator, value: string, hasNegation = false): QueryFilterOperator {
+  // Some invalid queries have value as an array
+  value = !value || typeof value !== 'string' ? '' : value;
   operator = (operator?.toUpperCase() as Operator) || operator;
   switch (operator) {
     case '=':
@@ -489,48 +536,64 @@ export function getOperatorFromWhereClause(operator: Operator, value: string, ha
 /**
  * Build where clauses from filter rows
  */
-function buildExpressionConditionWhereClause(whereClauses: WhereClause[], row: ExpressionConditionType, action: AndOr): WhereClause[] {
+function buildExpressionConditionWhereClause<T extends WhereClause | HavingClause>(
+  whereOrHavingClauses: T[],
+  row: ExpressionConditionType,
+  action: AndOr
+): T[] {
   // REGULAR WHERE CLAUSE
   if (isNegationOperator(row.selected.operator)) {
-    whereClauses.push({
+    (whereOrHavingClauses as (WhereClause | HavingClause)[]).push({
       left: { openParen: 1 },
       operator: 'NOT',
     });
-    whereClauses.push({
+    (whereOrHavingClauses as (WhereClause | HavingClause)[]).push({
       left: {
+        fn: row.selected.function
+          ? {
+              functionName: row.selected.function,
+              parameters: [row.selected.resource],
+            }
+          : undefined,
         operator: convertQueryFilterOperator(row.selected.operator),
         logicalPrefix: isNegationOperator(row.selected.operator) ? 'NOT' : undefined,
         field: row.selected.resource,
         value: getValue(row.selected.operator, row.selected.value),
-        literalType: getLiteralType(row.selected),
+        literalType: getLiteralType(row.selected, row.selected.function),
         closeParen: 1,
-      } as ValueCondition | ValueWithDateLiteralCondition,
+      } as ValueCondition | ValueWithDateLiteralCondition | ValueFunctionCondition,
       operator: action,
     });
   } else {
     // REGULAR WHERE CLAUSE
-    whereClauses.push({
+    (whereOrHavingClauses as (WhereClause | HavingClause)[]).push({
       left: {
+        fn: row.selected.function
+          ? {
+              functionName: row.selected.function,
+              parameters: [row.selected.resource],
+            }
+          : undefined,
         operator: convertQueryFilterOperator(row.selected.operator),
         logicalPrefix: isNegationOperator(row.selected.operator) ? 'NOT' : undefined,
         field: row.selected.resource,
         value: getValue(row.selected.operator, row.selected.value),
-        literalType: getLiteralType(row.selected),
-      } as ValueCondition | ValueWithDateLiteralCondition,
+        literalType: getLiteralType(row.selected, row.selected.function),
+      } as ValueCondition | ValueWithDateLiteralCondition | ValueFunctionCondition,
       operator: action,
     });
   }
-  return whereClauses;
+  return whereOrHavingClauses;
 }
 
-function buildExpressionGroupConditionWhereClause(
-  whereClauses: WhereClause[],
+function buildExpressionGroupConditionWhereClause<T extends WhereClause | HavingClause>(
+  whereOrHavingClauses: T[],
   group: ExpressionGroupType,
   parentAction: AndOr
-): WhereClause[] {
-  const tempWhereClauses: WhereClauseWithRightCondition[] = [];
+): T[] {
+  const tempWhereOrHavingClauses: (WhereClauseWithRightCondition | HavingClauseWithRightCondition)[] = [];
   group.rows.forEach((row, i) => {
-    const whereClause: Partial<WhereClauseWithRightCondition> = {
+    const whereOrHavingClause: Partial<WhereClauseWithRightCondition | HavingClauseWithRightCondition> = {
       left: {
         operator: convertQueryFilterOperator(row.selected.operator),
         logicalPrefix: isNegationOperator(row.selected.operator) ? 'NOT' : undefined,
@@ -543,32 +606,33 @@ function buildExpressionGroupConditionWhereClause(
     };
     // Add additional where clause
     if (isNegationOperator(row.selected.operator)) {
-      const negationCondition: Partial<WhereClauseWithRightCondition> = {
+      const negationCondition: Partial<WhereClauseWithRightCondition | HavingClauseWithRightCondition> = {
         left: { openParen: 1 },
         operator: 'NOT',
       };
-      (whereClause.left as ValueCondition | ValueWithDateLiteralCondition).closeParen = 1;
-      tempWhereClauses.push(negationCondition as WhereClauseWithRightCondition);
-      whereClauses.push(negationCondition as WhereClause);
+      (whereOrHavingClause.left as ValueCondition | ValueWithDateLiteralCondition).closeParen = 1;
+      tempWhereOrHavingClauses.push(negationCondition as WhereClauseWithRightCondition | HavingClauseWithRightCondition);
+      whereOrHavingClauses.push(negationCondition as T);
     }
-    tempWhereClauses.push(whereClause as WhereClauseWithRightCondition);
-    whereClauses.push(whereClause as WhereClause);
+    tempWhereOrHavingClauses.push(whereOrHavingClause as WhereClauseWithRightCondition | HavingClauseWithRightCondition);
+    whereOrHavingClauses.push(whereOrHavingClause as T);
   });
-  if (tempWhereClauses[0].left.openParen) {
-    tempWhereClauses[0].left.openParen += 1;
+  if (tempWhereOrHavingClauses[0].left.openParen) {
+    tempWhereOrHavingClauses[0].left.openParen += 1;
   } else {
-    tempWhereClauses[0].left.openParen = 1;
+    tempWhereOrHavingClauses[0].left.openParen = 1;
   }
-  if ((tempWhereClauses[tempWhereClauses.length - 1].left as ValueCondition | ValueWithDateLiteralCondition).closeParen) {
-    (tempWhereClauses[tempWhereClauses.length - 1].left as ValueCondition | ValueWithDateLiteralCondition).closeParen += 1;
+  const currentLeft = tempWhereOrHavingClauses[tempWhereOrHavingClauses.length - 1].left as ValueCondition | ValueWithDateLiteralCondition;
+  if (currentLeft.closeParen) {
+    currentLeft.closeParen += 1;
   } else {
-    (tempWhereClauses[tempWhereClauses.length - 1].left as ValueCondition | ValueWithDateLiteralCondition).closeParen = 1;
+    currentLeft.closeParen = 1;
   }
 
-  return whereClauses;
+  return whereOrHavingClauses;
 }
 
-export function isNegationOperator(operator: QueryFilterOperator): boolean {
+export function isNegationOperator(operator: Maybe<QueryFilterOperator>): boolean {
   switch (operator) {
     case 'doesNotContain':
     case 'doesNotStartWith':
@@ -579,7 +643,7 @@ export function isNegationOperator(operator: QueryFilterOperator): boolean {
   }
 }
 
-function getValue(operator: QueryFilterOperator, value: string | string[]): string | string[] {
+function getValue(operator: Maybe<QueryFilterOperator>, value: string | string[]): string | string[] {
   value = value || '';
   value = Array.isArray(value) ? value.map(escapeSoqlString) : escapeSoqlString(value);
   switch (operator) {
@@ -633,11 +697,71 @@ export function unescapeSoqlString(value: string) {
     .replace(REGEX.ESCAPED_BACKSLASH_QUOTE, `\\`);
 }
 
-function getLiteralType(selected: ExpressionConditionRowSelectedItems): LiteralType {
-  const field: Field = safeGet(selected, 'resourceMeta.metadata');
+/**
+ * Allows case-insensitive lookup
+ * @returns a map of lowercase function names to their proper case
+ */
+export function getLowercaseFieldFunctionMap(): Record<string, string> {
+  return [
+    'AVG',
+    'COUNT',
+    'COUNT_DISTINCT',
+    'MIN',
+    'MAX',
+    'SUM',
+    'CALENDAR_MONTH',
+    'CALENDAR_QUARTER',
+    'CALENDAR_YEAR',
+    'DAY_IN_MONTH',
+    'DAY_IN_WEEK',
+    'DAY_IN_YEAR',
+    'DAY_ONLY',
+    'FISCAL_MONTH',
+    'FISCAL_QUARTER',
+    'FISCAL_YEAR',
+    'HOUR_IN_DAY',
+    'WEEK_IN_MONTH',
+    'WEEK_IN_YEAR',
+  ].reduce((acc, item) => {
+    acc[item.toLowerCase()] = item;
+    return acc;
+  }, {});
+}
+
+function getLiteralType(selected: ExpressionConditionRowSelectedItems, functionName?: Maybe<string>): LiteralType {
+  const field: Field = safeGet(selected, 'resourceMeta.metadata', safeGet(selected, 'resourceMeta'));
 
   if (selected.operator === 'isNull' || selected.operator === 'isNotNull') {
     return 'NULL';
+  }
+
+  if (field && functionName) {
+    switch (functionName) {
+      case 'AVG':
+      case 'COUNT':
+      case 'COUNT_DISTINCT':
+      case 'MIN':
+      case 'MAX':
+      case 'SUM':
+        return 'INTEGER';
+      case 'CALENDAR_MONTH':
+      case 'CALENDAR_QUARTER':
+      case 'CALENDAR_YEAR':
+      case 'DAY_IN_MONTH':
+      case 'DAY_IN_WEEK':
+      case 'DAY_IN_YEAR':
+      case 'DAY_ONLY':
+      case 'FISCAL_MONTH':
+      case 'FISCAL_QUARTER':
+      case 'FISCAL_YEAR':
+      case 'HOUR_IN_DAY':
+      case 'WEEK_IN_MONTH':
+      case 'WEEK_IN_YEAR':
+        if (selected.resourceType === 'SELECT') {
+          return 'DATE_LITERAL';
+        }
+        return 'INTEGER';
+    }
   }
 
   if (field) {
@@ -667,7 +791,7 @@ function getLiteralType(selected: ExpressionConditionRowSelectedItems): LiteralT
   return 'STRING';
 }
 
-function convertQueryFilterOperator(operator: QueryFilterOperator): Operator {
+function convertQueryFilterOperator(operator: Maybe<QueryFilterOperator>): Operator {
   switch (operator) {
     case 'eq':
     case 'isNull':
@@ -708,17 +832,14 @@ function convertQueryFilterOperator(operator: QueryFilterOperator): Operator {
  * @param org
  */
 export function getOrgUrlParams(org: SalesforceOrgUi, additionalParams: { [param: string]: string } = {}): string {
-  const params = {
+  return new URLSearchParams({
     ...additionalParams,
     [HTTP.HEADERS.X_SFDC_ID]: org?.uniqueId || '',
-  };
-  return Object.keys(params)
-    .map((key) => `${key}=${encodeURIComponent(params[key])}`)
-    .join('&');
+  }).toString();
 }
 
-export function getOrgType(org: SalesforceOrgUi): SalesforceOrgUiType | undefined {
-  if (org) {
+export function getOrgType(org: Maybe<SalesforceOrgUi>): SalesforceOrgUiType | undefined {
+  if (org?.uniqueId) {
     if (org.orgIsSandbox) {
       return 'Sandbox';
     }
@@ -785,8 +906,9 @@ export function getPicklistListItems(field: Field): ListItem[] {
     value: item.value,
   }));
 }
+
 /// START ADD ORG ////
-let windowRef: Window | undefined;
+let windowRef: Maybe<Window>;
 let addOrgCallbackFn: (org: SalesforceOrgUi) => void;
 
 function handleWindowEvent(event: MessageEvent) {
@@ -809,19 +931,16 @@ function handleWindowEvent(event: MessageEvent) {
   }
 }
 
-export function addOrg(
-  options: { serverUrl: string; loginUrl: string; replaceOrgUniqueId?: string },
-  callback: (org: SalesforceOrgUi) => void
-) {
-  const { serverUrl, loginUrl, replaceOrgUniqueId } = options;
+export function addOrg(options: { serverUrl: string; loginUrl: string; addLoginTrue?: boolean }, callback: (org: SalesforceOrgUi) => void) {
+  const { serverUrl, loginUrl, addLoginTrue } = options;
   addOrgCallbackFn = callback;
   window.removeEventListener('message', handleWindowEvent);
   const strWindowFeatures = 'toolbar=no, menubar=no, width=1025, height=700';
-  let url = `${serverUrl}/oauth/sfdc/auth?`;
-  url += `loginUrl=${encodeURIComponent(loginUrl)}`;
-  url += `&clientUrl=${encodeURIComponent(document.location.origin)}`;
-  if (replaceOrgUniqueId) {
-    url += `&replaceOrgUniqueId=${encodeURIComponent(replaceOrgUniqueId)}`;
+  const url = new URL(`${serverUrl}/oauth/sfdc/auth`);
+  url.searchParams.set('loginUrl', loginUrl);
+  url.searchParams.set('clientUrl', document.location.origin);
+  if (addLoginTrue) {
+    url.searchParams.set('addLoginParam', 'true');
   }
   windowRef = window.open(url, 'Add Salesforce Org', strWindowFeatures);
   window.addEventListener('message', handleWindowEvent, false);
@@ -851,41 +970,6 @@ export function checkIfBulkApiJobIsDone(jobInfo: BulkJobWithBatches, totalBatche
   );
 }
 
-// TODO: This was built, but ended up not being used yet - should be useful in the future
-export async function pollBulkApiJobUntilDone(
-  selectedOrg: SalesforceOrgUi,
-  jobInfo: BulkJobWithBatches,
-  totalBatches: number,
-  options?: { interval?: number; maxAttempts?: number; onChecked?: (jobInfo: BulkJobWithBatches) => void }
-): Promise<BulkJobWithBatches> {
-  let { interval, maxAttempts, onChecked } = options || {};
-  interval = interval || DEFAULT_INTERVAL_5_SEC;
-  maxAttempts = maxAttempts || DEFAULT_MAX_ATTEMPTS;
-  onChecked = isFunction(onChecked) ? onChecked : NOOP;
-
-  let attempts = 0;
-  let done = false;
-  let jobInfoWithBatches: BulkJobWithBatches = jobInfo;
-  while (!done && attempts <= maxAttempts) {
-    await delay(interval);
-
-    jobInfoWithBatches = await bulkApiGetJob(selectedOrg, jobInfo.id);
-
-    logger.log({ jobInfoWithBatches });
-    onChecked(jobInfoWithBatches);
-    done = checkIfBulkApiJobIsDone(jobInfoWithBatches, totalBatches);
-    attempts++;
-    // back off checking if it is taking a long time
-    if (attempts % BACK_OFF_INTERVAL === 0) {
-      interval += DEFAULT_INTERVAL_5_SEC;
-    }
-  }
-  if (!done) {
-    throw new Error('Timed out while waiting for the job to finish, check Salesforce for results.');
-  }
-  return jobInfoWithBatches;
-}
-
 /**
  *
  * @param selectedOrg
@@ -908,7 +992,7 @@ export async function pollMetadataResultsUntilDone(
 
   let attempts = 0;
   let done = false;
-  let deployResults: DeployResult;
+  let deployResults: DeployResult = {} as DeployResult;
   while (!done && attempts <= maxAttempts) {
     await delay(interval);
     deployResults = await checkMetadataResults(selectedOrg, id, includeDetails);
@@ -943,11 +1027,11 @@ export async function pollRetrieveMetadataResultsUntilDone(
   interval = interval || DEFAULT_INTERVAL_5_SEC;
   maxAttempts = maxAttempts || DEFAULT_MAX_ATTEMPTS;
   onChecked = isFunction(onChecked) ? onChecked : NOOP;
-  const isCancelled = options.isCancelled || (() => false);
+  const isCancelled = options?.isCancelled || (() => false);
 
   let attempts = 0;
   let done = false;
-  let retrieveResults: RetrieveResult;
+  let retrieveResults: RetrieveResult = {} as RetrieveResult;
   while (!done && attempts <= maxAttempts) {
     await delay(interval);
     if (isCancelled && isCancelled()) {
@@ -1000,7 +1084,7 @@ export async function pollAndDeployMetadataResultsWhenReady(
 
   let attempts = 0;
   let done = false;
-  let retrieveResults: { type: 'deploy' | 'retrieve'; results: RetrieveResult; zipFile?: string };
+  let retrieveResults: { type: 'deploy' | 'retrieve'; results: RetrieveResult; zipFile?: string } | undefined = undefined;
   while (!done && attempts <= maxAttempts) {
     await delay(interval);
     retrieveResults = await checkMetadataRetrieveResultsAndDeployToTarget(selectedOrg, targetOrg, {
@@ -1017,7 +1101,7 @@ export async function pollAndDeployMetadataResultsWhenReady(
       interval += DEFAULT_INTERVAL_5_SEC;
     }
   }
-  if (!done) {
+  if (!done || !retrieveResults) {
     throw new Error('Timed out while checking for metadata results, check Salesforce for results.');
   }
   return retrieveResults;
@@ -1041,7 +1125,7 @@ export function readFile(file: File, type: 'text' | 'array_buffer' | 'data_url' 
       reader.readAsText(file);
     }
     reader.onload = (event: ProgressEvent<FileReader>) => {
-      resolve(reader.result);
+      resolve(reader.result || '');
     };
     reader.onabort = (event: ProgressEvent<FileReader>) => {
       logger.log('onabort', { event });
@@ -1069,6 +1153,7 @@ export async function parseFile(
     onParsedMultipleWorkbooks?: (worksheets: string[]) => Promise<string>;
     isBinaryString?: boolean;
     isPasteFromClipboard?: boolean;
+    extension?: string;
   }
 ): Promise<{
   data: any[];
@@ -1078,11 +1163,23 @@ export async function parseFile(
   options = options || {};
   if (!options.isBinaryString && isString(content)) {
     // csv - read from papaparse
-    const csvResult = parseCsv(content, {
-      delimiter: options.isPasteFromClipboard ? undefined : detectDelimiter(),
+    let csvResult = parseCsv(content, {
+      delimiter: options.isPasteFromClipboard ? undefined : detectDelimiter(options.extension),
       header: true,
       skipEmptyLines: true,
     });
+    // Check if it is likely an incorrect delimiter was used and re-parse file with auto-detect delimiter
+    if (
+      Array.isArray(csvResult.meta.fields) &&
+      csvResult.meta.fields.length === 1 &&
+      ((csvResult.meta.fields[0].includes(',') && csvResult.meta.delimiter === ';') ||
+        (csvResult.meta.fields[0].includes(';') && csvResult.meta.delimiter === ','))
+    ) {
+      csvResult = parseCsv(content, {
+        header: true,
+        skipEmptyLines: true,
+      });
+    }
     return {
       data: csvResult.data,
       headers: Array.from(new Set(csvResult.meta.fields)), // remove duplicates, if any
@@ -1108,7 +1205,7 @@ export async function parseWorkbook(
   errors: string[];
 }> {
   let selectedSheet = workbook.Sheets[workbook.SheetNames[0]];
-  if (workbook.SheetNames.length > 1 && typeof options.onParsedMultipleWorkbooks === 'function') {
+  if (workbook.SheetNames.length > 1 && typeof options?.onParsedMultipleWorkbooks === 'function') {
     const sheetName = await options.onParsedMultipleWorkbooks(workbook.SheetNames);
     if (workbook.Sheets[sheetName]) {
       selectedSheet = workbook.Sheets[sheetName];
@@ -1121,7 +1218,8 @@ export async function parseWorkbook(
     blankrows: false,
     rawNumbers: true,
   });
-  const headers = data.length > 0 ? Object.keys(data[0]) : [];
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const headers = data.length > 0 ? Object.keys(data[0]!) : [];
   return {
     data,
     headers: headers.filter((field) => !field.startsWith('__empty')),
@@ -1138,7 +1236,10 @@ export function generateCsv(data: any[], options: UnparseConfig = {}): string {
   return unparseCsv(data, options);
 }
 
-function detectDelimiter(): string {
+function detectDelimiter(extension?: string): string {
+  if (extension === INPUT_ACCEPT_FILETYPES.TSV) {
+    return '\t';
+  }
   let delimiter = ',';
   try {
     // determine if delimiter is the same as the decimal symbol in current locale
@@ -1161,9 +1262,9 @@ function detectDelimiter(): string {
  * @param options
  * @returns
  */
-export function convertDateToLocale(dateOrIsoDateString: string | Date, options?: Intl.DateTimeFormatOptions): string {
+export function convertDateToLocale(dateOrIsoDateString: string | Date, options?: Intl.DateTimeFormatOptions): string | undefined {
   if (!dateOrIsoDateString) {
-    return dateOrIsoDateString as undefined;
+    return undefined;
   }
   const date = dateOrIsoDateString instanceof Date ? dateOrIsoDateString : parseISO(dateOrIsoDateString);
   if (!options) {
@@ -1173,12 +1274,33 @@ export function convertDateToLocale(dateOrIsoDateString: string | Date, options?
   }
 }
 
+export function detectDateFormatForLocale() {
+  try {
+    const locale = navigator.language || 'en-US';
+    const testDate = new Date(2021, 11, 24); // December 24, 2021
+    const formattedDate = new Intl.DateTimeFormat(locale).format(testDate);
+
+    if (formattedDate.startsWith('12')) {
+      return DATE_FORMATS.MM_DD_YYYY;
+    } else if (formattedDate.startsWith('24')) {
+      return DATE_FORMATS.DD_MM_YYYY;
+    } else if (formattedDate.startsWith('2021')) {
+      return DATE_FORMATS.YYYY_MM_DD;
+    }
+  } catch (ex) {
+    logger.warn(`[ERROR] Exception detecting date format`, ex.message);
+  }
+
+  logger.warn(`[ERROR] Falling back to ${DATE_FORMATS.MM_DD_YYYY}`);
+  return DATE_FORMATS.MM_DD_YYYY;
+}
+
 export function convertArrayOfObjectToArrayOfArray(data: any[], headers?: string[]): any[][] {
   if (!data || !data.length) {
     return [];
   }
-  headers = headers || Object.keys(data[0]);
-  return [headers].concat(data.map((row) => headers.map((header) => row[header])));
+  headers = headers || Object.keys(data[0]) || [];
+  return [headers].concat(data.map((row) => headers?.map((header) => row[header]) || []));
 }
 
 export function getValueForExcel(value: any) {
@@ -1202,20 +1324,23 @@ export function getValueForExcel(value: any) {
  * @param data
  * @param fields
  */
-export function transformTabularDataToExcelStr<T = unknown>(data: T[], fields?: string[], includeHeader = true): string {
+export function transformTabularDataToExcelStr<T = Record<string, unknown>>(
+  data: Maybe<T>[],
+  fields?: Maybe<string[]>,
+  includeHeader = true
+): string {
   if (!Array.isArray(data) || data.length === 0) {
     return '';
   }
-  if (!fields) {
-    fields = Object.keys(data[0]);
-  }
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  fields = fields || Object.keys(data[0]!) || [];
 
   // turn each row into \t delimited string, then combine each row into a string delimited by \n
   let output: string = data
     .map((row) =>
       fields
-        .map((field) => {
-          return getValueForExcel(row[field]);
+        ?.map((field) => {
+          return getValueForExcel(row?.[field]);
         })
         .join('\t')
     )
@@ -1228,8 +1353,53 @@ export function transformTabularDataToExcelStr<T = unknown>(data: T[], fields?: 
   return output;
 }
 
+/**
+ * Same as transformTabularDataToExcelStr but returns as HTML table
+ * This can be pasted into spreadsheet programs like Excel with better formatting
+ *
+ * @param data
+ * @param fields
+ * @param includeHeader
+ * @returns
+ */
+export function transformTabularDataToHtml<T = unknown>(data: T[], fields?: Maybe<string[]>, includeHeader = true): string {
+  if (!Array.isArray(data) || data.length === 0) {
+    return '';
+  }
+  if (!fields) {
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    fields = Object.keys(data[0]!);
+  }
+
+  // turn each row into \t delimited string, then combine each row into a string delimited by \n
+  let output: string = data.map((row) => `<tr>${fields?.map((field) => `<td>${escapeHtml(row[field])}</td>`).join('')}</tr>`).join('');
+
+  if (includeHeader) {
+    output = `<tr>${fields.map((field) => `<th>${escapeHtml(field)}</th>`).join('')}</tr>${output}`;
+  }
+
+  return `<table>${output}</table>`;
+}
+
 export function isErrorResponse(value: any): value is ErrorResult {
   return !value.success;
+}
+
+/**
+ * https://stackoverflow.com/questions/6234773/can-i-escape-html-special-chars-in-javascript
+ */
+export function escapeHtml(value = '') {
+  try {
+    if (isNil(value)) {
+      value = '';
+    }
+    if (typeof value === 'object') {
+      value = JSON.stringify(value);
+    }
+    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  } catch (ex) {
+    return value;
+  }
 }
 
 // https://github.com/salesforce/design-system-react/blob/master/utilities/menu-item-select-scroll.js
@@ -1246,7 +1416,7 @@ export function menuItemSelectScroll({
   scrollPadding?: number;
 }) {
   try {
-    const domItem: HTMLLIElement = container.querySelector(`${itemTag}:nth-child(${focusedIndex + 1})`);
+    const domItem: HTMLLIElement | null = container.querySelector(`${itemTag}:nth-child(${focusedIndex + 1})`);
 
     if (domItem) {
       if (domItem.offsetHeight - container.scrollTop + domItem.offsetTop >= container.offsetHeight) {
@@ -1285,14 +1455,44 @@ export function useReducerFetchFn<T>() {
           ...state,
           loading: false,
           hasError: true,
-          errorMessage: action.payload.errorMessage,
-          data: action.payload.data ?? state.data,
+          errorMessage: action.payload?.errorMessage,
+          data: action.payload?.data ?? state.data,
         };
       default:
         throw new Error('Invalid action');
     }
   }
   return reducer;
+}
+
+const is15or18Digits = /[a-z0-9]{15}|[a-z0-9]{18}/i;
+const is18Digits = /[a-z0-9]{18}/i;
+
+/**
+ * Validate if a string is a valid salesforce id
+ * https://gist.github.com/step307/3d265b7c7cb4eccdf0cf55a68c9cfefa
+ */
+export function isValidSalesforceRecordId(recordId?: string, allow15Char = true): boolean {
+  const regex = allow15Char ? is15or18Digits : is18Digits;
+  if (!recordId || !regex.test(recordId)) {
+    return false;
+  }
+  if (recordId.length === 15 && allow15Char) {
+    // no way to completely validate this
+    return true;
+  }
+  const upperCaseToBit = (char: string) => (char.match(/[A-Z]/) ? '1' : '0');
+  const binaryToSymbol = (digit: number) => (digit <= 25 ? String.fromCharCode(digit + 65) : String.fromCharCode(digit - 26 + 48));
+
+  const parts = [
+    recordId.slice(0, 5).split('').reverse().map(upperCaseToBit).join(''),
+    recordId.slice(5, 10).split('').reverse().map(upperCaseToBit).join(''),
+    recordId.slice(10, 15).split('').reverse().map(upperCaseToBit).join(''),
+  ];
+
+  const check = parts.map((str) => binaryToSymbol(parseInt(str, 2))).join('');
+
+  return check === recordId.slice(-3);
 }
 
 /**
@@ -1351,14 +1551,133 @@ export async function getChangesetsFromDomParse(org: SalesforceOrgUi) {
 
   const changesets: ChangeSet[] = Array.from(changesetTable)
     .map((row) => ({
-      link: row.children[1].children[0].getAttribute('href'),
-      name: row.children[1].textContent.replace('\n', '').trim(),
-      description: row.children[2].textContent.replace('\n', '').trim() || null,
-      status: row.children[3].textContent.replace('\n', '').trim() as 'Open' | 'Closed',
-      modifiedBy: row.children[4].textContent.replace('\n', '').trim(),
-      modifiedDate: row.children[5].textContent.replace('\n', '').trim(),
+      link: row.children[1].children[0].getAttribute('href') || '',
+      name: row.children[1].textContent?.replace('\n', '').trim() || '',
+      description: row.children[2].textContent?.replace('\n', '').trim() || null,
+      status: row.children[3].textContent?.replace('\n', '').trim() as 'Open' | 'Closed',
+      modifiedBy: row.children[4].textContent?.replace('\n', '').trim() || '',
+      modifiedDate: row.children[5].textContent?.replace('\n', '').trim() || '',
     }))
     .filter((item) => item.status === 'Open');
 
   return changesets;
+}
+
+/**
+ * Gets map of list items by id
+ * recursively traverses child items
+ */
+export function getFlattenedListItemsById(items: ListItem[], output = {}): Record<string, ListItem> {
+  items.forEach((item) => {
+    output[item.id] = item;
+    if (Array.isArray(item.childItems)) {
+      getFlattenedListItemsById(item.childItems, output);
+    }
+  });
+  return output;
+}
+
+/**
+ * Given an object of all items by id, use the parentId field to create a tree structure
+ * the parentId is blank for all the top level items and is "." delimited for all parentId's
+ */
+export function unFlattenedListItemsById(items: Record<string, ListItem>): ListItem[] {
+  const output: ListItem[] = [];
+  const childItemsByParentId: Record<string, ListItem[]> = {};
+  // clone items to ensure we don't mutate the original
+  items = JSON.parse(JSON.stringify(items));
+  Object.keys(items).forEach((key) => {
+    const item = items[key];
+    if (item.parentId === '') {
+      output.push(item);
+    } else if (item.parentId) {
+      childItemsByParentId[item.parentId] = childItemsByParentId[item.parentId] || [];
+      childItemsByParentId[item.parentId].push(item);
+    }
+  });
+  Object.keys(childItemsByParentId).forEach((key) => {
+    if (items[key]) {
+      items[key].childItems = childItemsByParentId[key];
+    }
+  });
+  return output;
+}
+
+export function getListItemsFromFieldWithRelatedItems(fields: Field[], parentId = ''): ListItem[] {
+  const parentPath = parentId ? `${parentId}.` : '';
+  const allowChildren = parentPath.split('.').length <= 5;
+  const relatedFields: ListItem[] = fields
+    .filter((field) => allowChildren && Array.isArray(field.referenceTo) && field.referenceTo.length > 0 && field.relationshipName)
+    .map((field) => ({
+      id: `${parentPath}${field.relationshipName}`,
+      value: `${parentPath}${field.relationshipName}`,
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      label: field.relationshipName!,
+      secondaryLabel: field.referenceTo?.[0],
+      secondaryLabelOnNewLine: true,
+      isDrillInItem: true,
+      parentId: parentId,
+      meta: field,
+    }));
+
+  const coreFields: ListItem[] = fields.flatMap((field) => ({
+    id: `${parentPath}${field.name}`,
+    value: `${parentPath}${field.name}`,
+    label: field.label,
+    secondaryLabel: field.name,
+    secondaryLabelOnNewLine: true,
+    parentId: parentId,
+    meta: field,
+  }));
+
+  return [...relatedFields, ...coreFields];
+}
+
+/**
+ * If there is a change in UI that would make an element take a render ror more
+ * to be added to the dom, this will try a {maxAttempts} times to focus the element
+ *
+ * @param element
+ * @param backOff
+ * @param attempt
+ * @param maxAttempts
+ * @returns
+ */
+export function focusElementFromRefWhenAvailable<T extends HTMLElement>(
+  element: Maybe<React.RefObject<T>>,
+  backOff = 0,
+  attempt = 0,
+  maxAttempts = 3
+) {
+  if (!element) {
+    return;
+  }
+  if (element.current) {
+    element.current.focus();
+  } else {
+    if (attempt < maxAttempts) {
+      setTimeout(() => {
+        focusElementFromRefWhenAvailable(element, backOff + 50, attempt + 1, maxAttempts);
+      }, backOff);
+    }
+  }
+}
+
+export function isRelationshipField(field: Field): boolean {
+  // Some fields are listed as a string, but are actually lookup fields
+  return (field.type === 'reference' || field.type === 'string') && !!field.relationshipName && !!field.referenceTo?.length;
+}
+
+/**
+ * Filter objects for load
+ * @param sobject
+ * @returns
+ */
+export function filterLoadSobjects(sobject: DescribeGlobalSObjectResult | DescribeSObjectResult) {
+  return (
+    (sobject.createable || sobject.updateable || sobject.name.endsWith('__mdt')) &&
+    !sobject.name.endsWith('__History') &&
+    !sobject.name.endsWith('__Tag') &&
+    !sobject.name.endsWith('__Feed')
+  );
 }

@@ -1,129 +1,146 @@
-import { ENV, logger } from '@jetstream/api-config';
-import { SalesforceOrgUi, SObjectOrganization, UserProfileServer } from '@jetstream/types';
-import * as express from 'express';
-import * as jsforce from 'jsforce';
+import { ENV, getExceptionLog, logger } from '@jetstream/api-config';
+import { ApiConnection, ApiRequestError, getApiRequestFactoryFn } from '@jetstream/salesforce-api';
+import { ERROR_MESSAGES } from '@jetstream/shared/constants';
+import { SObjectOrganization, SalesforceOrgUi } from '@jetstream/types';
+import { CallbackParamsType } from 'openid-client';
+import { z } from 'zod';
 import * as salesforceOrgsDb from '../db/salesforce-org.db';
-import { getJsforceOauth2 } from '../utils/auth-utils';
+import * as oauthService from '../services/oauth.service';
+import { createRoute } from '../utils/route.utils';
 import { OauthLinkParams } from './auth.controller';
 
+export const routeDefinition = {
+  salesforceOauthInitAuth: {
+    controllerFn: () => salesforceOauthInitAuth,
+    validators: {
+      query: z.object({
+        loginUrl: z.string().min(1),
+        addLoginParam: z
+          .enum(['true', 'false'])
+          .nullish()
+          .transform((val) => val === 'true'),
+      }),
+      hasSourceOrg: false,
+    },
+  },
+  salesforceOauthCallback: {
+    controllerFn: () => salesforceOauthCallback,
+    validators: {
+      query: z.record(z.any()),
+      hasSourceOrg: false,
+    },
+  },
+};
+
 /**
  * Prepare SFDC auth and redirect to Salesforce
  * @param req
  * @param res
  */
-export function salesforceOauthInitAuth(req: express.Request, res: express.Response) {
-  const loginUrl = req.query.loginUrl as string;
-  const clientUrl = req.query.clientUrl as string;
-  const replaceOrgUniqueId = req.query.replaceOrgUniqueId as string | undefined;
-  const state = new URLSearchParams({ loginUrl, clientUrl, replaceOrgUniqueId }).toString();
-
-  let options = {
-    scope: 'api web refresh_token',
-    state,
-    prompt: 'login',
-  };
-
-  if (req.query.username) {
-    options = Object.assign(options, { login_hint: req.query.username });
-  }
-
-  res.redirect(getJsforceOauth2(loginUrl).getAuthorizationUrl(options));
-}
+const salesforceOauthInitAuth = createRoute(routeDefinition.salesforceOauthInitAuth.validators, async ({ query }, req, res, next) => {
+  const { loginUrl, addLoginParam } = query;
+  const { authorizationUrl, code_verifier, nonce, state } = oauthService.salesforceOauthInit(loginUrl, { addLoginParam });
+  req.session.orgAuth = { code_verifier, nonce, state, loginUrl };
+  res.redirect(authorizationUrl);
+});
 
 /**
  * Prepare SFDC auth and redirect to Salesforce
  * @param req
  * @param res
  */
-export async function salesforceOauthCallback(req: express.Request, res: express.Response) {
-  const user = req.user as UserProfileServer;
-  const state = new URLSearchParams(req.query.state as string);
-  const loginUrl = state.get('loginUrl');
-  const clientUrl = state.get('clientUrl') || new URL(ENV.JETSTREAM_CLIENT_URL).origin;
-  const replaceOrgUniqueId = state.get('replaceOrgUniqueId') || undefined;
+const salesforceOauthCallback = createRoute(routeDefinition.salesforceOauthCallback.validators, async ({ query, user }, req, res, next) => {
+  const queryParams = query as CallbackParamsType;
+  const clientUrl = new URL(ENV.JETSTREAM_CLIENT_URL!).origin;
   const returnParams: OauthLinkParams = {
     type: 'salesforce',
     clientUrl,
   };
 
   try {
+    const orgAuth = req.session.orgAuth;
+    req.session.orgAuth = undefined;
+
     // ERROR PATH
-    if (req.query.error) {
-      returnParams.error = (req.query.error as string) || 'Unexpected Error';
-      returnParams.message = req.query.error_description
-        ? (req.query.error_description as string)
+    if (queryParams.error) {
+      returnParams.error = (queryParams.error as string) || 'Unexpected Error';
+      returnParams.message = queryParams.error_description
+        ? (queryParams.error_description as string)
         : 'There was an error authenticating with Salesforce.';
-      logger.info('[OAUTH][ERROR] %s', req.query.error, { ...req.query });
-      return res.redirect(`/oauth-link/?${new URLSearchParams(returnParams as any).toString()}`);
+      req.log.info({ ...query, requestId: res.locals.requestId, queryParams }, '[OAUTH][ERROR] %s', queryParams.error);
+      return res.redirect(`/oauth-link/?${new URLSearchParams(returnParams as any).toString().replaceAll('+', '%20')}`);
+    } else if (!orgAuth) {
+      returnParams.error = 'Authentication Error';
+      returnParams.message = queryParams.error_description
+        ? (queryParams.error_description as string)
+        : 'There was an error authenticating with Salesforce.';
+      req.log.info({ ...query, requestId: res.locals.requestId, queryParams }, '[OAUTH][ERROR] Missing orgAuth from session');
+      return res.redirect(`/oauth-link/?${new URLSearchParams(returnParams as any).toString().replaceAll('+', '%20')}`);
     }
 
-    const conn = new jsforce.Connection({ oauth2: getJsforceOauth2(loginUrl as string) });
-    const userInfo = await conn.authorize(req.query.code as string);
+    const { code_verifier, nonce, state, loginUrl } = orgAuth;
 
-    const salesforceOrg = await initConnectionFromOAuthResponse({
-      conn,
-      userInfo,
-      loginUrl,
-      userId: user.id,
-      replaceOrgUniqueId,
+    const { access_token, refresh_token, userInfo } = await oauthService.salesforceOauthCallback(loginUrl, query, {
+      code_verifier,
+      nonce,
+      state,
     });
 
-    // TODO: figure out what other data we need
-    // try {
-    // TODO: what about if a user is assigned a permission set that gives PermissionsModifyAllData?
-    //   const data = await getExtendedOrgInfo(conn, returnObject);
-    //   returnObject = Object.assign({}, returnObject, data);
-    // } catch (ex) {
-    //   logger.log('Error adding extended org data');
-    // }
+    const jetstreamConn = new ApiConnection({
+      apiRequestAdapter: getApiRequestFactoryFn(fetch),
+      userId: userInfo.user_id,
+      organizationId: userInfo.organization_id,
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+      accessToken: access_token!,
+      apiVersion: ENV.SFDC_API_VERSION,
+      instanceUrl: userInfo.urls.custom_domain || loginUrl,
+      refreshToken: refresh_token,
+      logging: ENV.LOG_LEVEL === 'trace',
+    });
+
+    const salesforceOrg = await initConnectionFromOAuthResponse({
+      jetstreamConn,
+      userId: user.id,
+    });
 
     returnParams.data = JSON.stringify(salesforceOrg);
-    return res.redirect(`/oauth-link/?${new URLSearchParams(returnParams as any).toString()}`);
+    return res.redirect(`/oauth-link/?${new URLSearchParams(returnParams as any).toString().replaceAll('+', '%20')}`);
   } catch (ex) {
-    const userInfo = req.user ? { username: (req.user as any)?.displayName, userId: (req.user as any)?.user_id } : undefined;
-    logger.info('[OAUTH][ERROR] %o', ex.message, { userInfo });
+    req.log.info({ ...getExceptionLog(ex) }, '[OAUTH][ERROR]');
     returnParams.error = ex.message || 'Unexpected Error';
-    returnParams.message = req.query.error_description
-      ? (req.query.error_description as string)
+    returnParams.message = query.error_description
+      ? (query.error_description as string)
       : 'There was an error authenticating with Salesforce.';
-    return res.redirect(`/oauth-link/?${new URLSearchParams(returnParams as any).toString()}`);
+    return res.redirect(`/oauth-link/?${new URLSearchParams(returnParams as any).toString().replaceAll('+', '%20')}`);
   }
-}
+});
 
-export async function initConnectionFromOAuthResponse({
-  conn,
-  userInfo,
-  loginUrl,
-  userId,
-  replaceOrgUniqueId,
-}: {
-  conn: jsforce.Connection;
-  userInfo: jsforce.UserInfo;
-  loginUrl: string;
-  userId: string;
-  replaceOrgUniqueId?: string;
-}) {
-  const identity = await conn.identity();
-  let companyInfoRecord: SObjectOrganization;
+export async function initConnectionFromOAuthResponse({ jetstreamConn, userId }: { jetstreamConn: ApiConnection; userId: string }) {
+  const identity = await jetstreamConn.org.identity();
+  let companyInfoRecord: SObjectOrganization | undefined;
 
   try {
-    const results = await conn.query<SObjectOrganization>(
+    const { queryResults: results } = await jetstreamConn.query.query<SObjectOrganization>(
       `SELECT Id, Name, Country, OrganizationType, InstanceName, IsSandbox, LanguageLocaleKey, NamespacePrefix, TrialExpirationDate FROM Organization`
     );
     if (results.totalSize > 0) {
       companyInfoRecord = results.records[0];
     }
   } catch (ex) {
-    logger.warn(ex);
+    logger.warn({ userId, ...getExceptionLog(ex) }, 'Error getting org info %o', ex);
+    if (ex instanceof ApiRequestError && ERROR_MESSAGES.SFDC_REST_API_NOT_ENABLED.test(ex.message)) {
+      throw new Error(ERROR_MESSAGES.SFDC_REST_API_NOT_ENABLED_MSG);
+    }
   }
 
   const orgName = companyInfoRecord?.Name || 'Unknown Organization';
 
   const salesforceOrgUi: Partial<SalesforceOrgUi> = {
-    uniqueId: `${userInfo.organizationId}-${userInfo.id}`,
-    accessToken: salesforceOrgsDb.encryptAccessToken(conn.accessToken, conn.refreshToken),
-    instanceUrl: conn.instanceUrl,
-    loginUrl,
+    uniqueId: `${jetstreamConn.sessionInfo.organizationId}-${jetstreamConn.sessionInfo.userId}`,
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    accessToken: salesforceOrgsDb.encryptAccessToken(jetstreamConn.sessionInfo.accessToken, jetstreamConn.sessionInfo.refreshToken!),
+    instanceUrl: jetstreamConn.sessionInfo.instanceUrl,
+    loginUrl: jetstreamConn.sessionInfo.instanceUrl,
     userId: identity.user_id,
     email: identity.email,
     organizationId: identity.organization_id,
@@ -140,6 +157,6 @@ export async function initConnectionFromOAuthResponse({
     orgTrialExpirationDate: companyInfoRecord?.TrialExpirationDate,
   };
 
-  const salesforceOrg = await salesforceOrgsDb.createOrUpdateSalesforceOrg(userId, salesforceOrgUi, replaceOrgUniqueId);
+  const salesforceOrg = await salesforceOrgsDb.createOrUpdateSalesforceOrg(userId, salesforceOrgUi);
   return salesforceOrg;
 }

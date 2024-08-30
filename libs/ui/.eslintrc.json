@@ -129,6 +129,17 @@
       "toolbar",
       "top"
     ],
+    "no-restricted-imports": [
+      "error",
+      {
+        "paths": [
+          {
+            "name": "lodash",
+            "message": "Import [module] from lodash/[module] instead"
+          }
+        ]
+      }
+    ],
     "no-unexpected-multiline": "warn",
     "no-unreachable": "warn",
     "no-unused-expressions": [
@@ -273,7 +284,7 @@
     }
   },
   "plugins": ["import", "jsx-a11y", "react", "react-hooks"],
-  "extends": ["plugin:@nrwl/nx/react", "../../.eslintrc.json"],
+  "extends": ["plugin:@nx/react", "../../.eslintrc.json"],
   "ignorePatterns": ["!**/*", ".storybook/*"],
   "overrides": [
     {

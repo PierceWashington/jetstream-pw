@@ -1,13 +1,12 @@
 import { useDebounce, useNonInitialEffect } from '@jetstream/shared/ui-utils';
 import { multiWordObjectFilter, splitArrayToMaxSize } from '@jetstream/shared/utils';
-import { CloneEditView, MapOf, PicklistFieldValues, Record } from '@jetstream/types';
+import { CloneEditView, Field, PicklistFieldValues, SalesforceRecord } from '@jetstream/types';
 import { Checkbox, EmptyState, Grid, SearchInput, Select } from '@jetstream/ui';
 import classNames from 'classnames';
-import { Field } from 'jsforce';
 import { Fragment, FunctionComponent, useEffect, useState } from 'react';
+import UiRecordFormField from './UiRecordFormField';
 import { EditableFields } from './ui-record-form-types';
 import { convertMetadataToEditableFields } from './ui-record-form-utils';
-import UiRecordFormField from './UiRecordFormField';
 
 export interface UiRecordFormProps {
   controlClassName?: string;
@@ -15,10 +14,11 @@ export interface UiRecordFormProps {
   action: CloneEditView;
   sobjectFields: Field[];
   picklistValues: PicklistFieldValues;
-  record: Record;
-  saveErrors?: MapOf<string>;
+  record: SalesforceRecord;
+  saveErrors?: Record<string, string | undefined>;
   disabled?: boolean;
-  onChange: (record: Record) => void;
+  onChange: (record: SalesforceRecord) => void;
+  viewRelatedRecord?: (recordId: string, metadata: Field) => void;
 }
 
 export const UiRecordForm: FunctionComponent<UiRecordFormProps> = ({
@@ -28,15 +28,17 @@ export const UiRecordForm: FunctionComponent<UiRecordFormProps> = ({
   sobjectFields,
   picklistValues,
   record,
-  saveErrors = {},
+  saveErrors,
   disabled = false,
   onChange,
+  viewRelatedRecord,
 }) => {
   const [columnSize, setColumnSize] = useState<1 | 2 | 3 | 4>(2);
   const [showReadOnlyFields, setShowReadOnlyFields] = useState(true);
   const [showFieldTypes, setShowFieldTypes] = useState(false);
   const [limitToRequired, setLimitToRequired] = useState(false);
-  const [modifiedRecord, setModifiedRecord] = useState<Record>({});
+  const [limitToErrorFields, setLimitToErrorFields] = useState(false);
+  const [modifiedRecord, setModifiedRecord] = useState<SalesforceRecord>({});
   const [visibleFieldMetadataRows, setVisibleFieldMetadataRows] = useState<EditableFields[][]>();
   const [fieldMetadata, setFieldMetadata] = useState(() => {
     return convertMetadataToEditableFields(sobjectFields, picklistValues, action, record);
@@ -58,7 +60,12 @@ export const UiRecordForm: FunctionComponent<UiRecordFormProps> = ({
         visibleFields = visibleFields.filter((field) => !field.readOnly);
       }
       if (limitToRequired) {
-        visibleFields = visibleFields.filter((field) => !field.metadata.nillable && field.metadata.createable);
+        visibleFields = visibleFields.filter(
+          (field) => !field.metadata.nillable && field.metadata.type !== 'boolean' && field.metadata.createable
+        );
+      }
+      if (limitToErrorFields) {
+        visibleFields = visibleFields.filter((field) => saveErrors?.[field.name]);
       }
       if (visibleFields.length) {
         setVisibleFieldMetadataRows(splitArrayToMaxSize(visibleFields, columnSize));
@@ -66,7 +73,7 @@ export const UiRecordForm: FunctionComponent<UiRecordFormProps> = ({
         setVisibleFieldMetadataRows([]);
       }
     }
-  }, [fieldMetadata, debouncedFilters, showReadOnlyFields, columnSize, limitToRequired, action]);
+  }, [fieldMetadata, debouncedFilters, showReadOnlyFields, columnSize, limitToRequired, action, limitToErrorFields, saveErrors]);
 
   useNonInitialEffect(() => {
     setFieldMetadata(convertMetadataToEditableFields(sobjectFields, picklistValues, action, record));
@@ -136,10 +143,19 @@ export const UiRecordForm: FunctionComponent<UiRecordFormProps> = ({
             disabled={!fieldMetadata || disabled}
             onChange={setLimitToRequired}
           />
+          {saveErrors && Object.keys(saveErrors).length > 0 && (
+            <Checkbox
+              id={`record-form-limit-to-error`}
+              label="Show Fields with Errors"
+              checked={limitToErrorFields}
+              disabled={!fieldMetadata || disabled}
+              onChange={setLimitToErrorFields}
+            />
+          )}
         </Grid>
       </div>
       <hr className="slds-m-around_xx-small" />
-      {fieldMetadata?.length && !visibleFieldMetadataRows?.length && (
+      {!!fieldMetadata?.length && !visibleFieldMetadataRows?.length && (
         <EmptyState headline="There are no matching fields" subHeading="Adjust your selection."></EmptyState>
       )}
       {visibleFieldMetadataRows && (
@@ -150,13 +166,15 @@ export const UiRecordForm: FunctionComponent<UiRecordFormProps> = ({
                 <div key={field.name} className="slds-form__item" role="listitem">
                   <UiRecordFormField
                     field={field}
-                    saveError={saveErrors[field.name]}
+                    saveError={saveErrors?.[field.name]}
                     disabled={disabled}
                     initialValue={record[field.name]}
                     modifiedValue={modifiedRecord[field.name]}
+                    relatedRecord={field.metadata.relationshipName ? record[field.metadata.relationshipName] : null}
                     showFieldTypes={showFieldTypes}
                     omitUndoIndicator={action === 'create'}
                     onChange={handleRecordUpdate}
+                    viewRelatedRecord={viewRelatedRecord}
                   />
                 </div>
               ))}

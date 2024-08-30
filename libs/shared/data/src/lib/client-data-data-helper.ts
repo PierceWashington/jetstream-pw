@@ -1,42 +1,73 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { logger } from '@jetstream/shared/client-logger';
 import { HTTP } from '@jetstream/shared/constants';
+import { delay } from '@jetstream/shared/utils';
 import {
   ApiResponse,
   ListMetadataResult,
   ListMetadataResultRaw,
-  MapOf,
   RetrieveResult,
   RetrieveResultRaw,
   SalesforceOrgUi,
 } from '@jetstream/types';
-import axios, { AxiosAdapter, AxiosError, AxiosRequestConfig, AxiosResponse } from 'axios';
-import parseISO from 'date-fns/parseISO';
-import { isEmpty, isObject } from 'lodash';
+import axios, {
+  AxiosError,
+  AxiosRequestConfig,
+  AxiosResponse,
+  AxiosResponseHeaders,
+  InternalAxiosRequestConfig,
+  RawAxiosResponseHeaders,
+} from 'axios';
+import { parseISO } from 'date-fns/parseISO';
+import isEmpty from 'lodash/isEmpty';
+import isObject from 'lodash/isObject';
 import isString from 'lodash/isString';
+import { v4 as uuid } from 'uuid';
 import { getCacheItemHttp, saveCacheItemHttp } from './client-data-cache';
 import { SOBJECT_DESCRIBE_CACHED_RESPONSES } from './client-data-data-cached-responses';
 import { errorMiddleware } from './middleware';
 
-function getHeader(headers: MapOf<string>, header: string) {
+interface RequestOptions {
+  org?: SalesforceOrgUi;
+  targetOrg?: SalesforceOrgUi;
+  mockHeaderKey?: string;
+  useCache?: boolean;
+  skipRequestCache?: boolean;
+  skipCacheIfOlderThan?: number;
+  useQueryParamsInCacheKey?: boolean;
+  useBodyInCacheKey?: boolean;
+  retryCount?: number;
+}
+
+const RETRY_CONFIG = {
+  /** Number of times to retry */
+  retry: 2,
+  /** Exponential Backoff */
+  retryDelay: (retryCount: number) => {
+    return retryCount * 1_000;
+  },
+  endpoints: [
+    /^\/api\/metadata\/deploy\/([a-zA-Z0-9]+)$/,
+    /^\/api\/metadata\/retrieve\/check-results$/,
+    /^\/api\/bulk\/([a-zA-Z0-9]+)$/,
+    /^\/api\/bulk\/([a-zA-Z0-9]+)\/([a-zA-Z0-9]+)$/,
+  ],
+  methods: new Set(['GET']),
+  statusCodes: new Set([429, 500, 502, 503, 504]),
+} as const;
+
+function getHeader(headers: RawAxiosResponseHeaders | AxiosResponseHeaders, header: string) {
   if (!headers || !header) {
     return null;
   }
-  return headers[header] || headers[header.toLowerCase()];
+  const value = headers[header] || headers[header.toLowerCase()];
+  if (!value && typeof headers.get === 'function') {
+    return headers.get(header) || headers.get(header.toLowerCase());
+  }
+  return value;
 }
 
-const baseConfig: Partial<AxiosRequestConfig> = {};
-
-export function initForElectron(adapter: AxiosAdapter) {
-  // use MessagePort adapter for communicating with server
-  baseConfig.adapter = adapter;
-}
-
-export function initForElectronWorker() {
-  baseConfig.baseURL = 'http://localhost/worker';
-  // use MessagePort adapter for communicating with server
-  // baseConfig.adapter = adapter;
-}
+const baseConfig: Partial<InternalAxiosRequestConfig> = {};
 
 /** Use for API calls going to external locations */
 export async function handleExternalRequest<T = any>(config: AxiosRequestConfig): Promise<AxiosResponse<T>> {
@@ -44,16 +75,24 @@ export async function handleExternalRequest<T = any>(config: AxiosRequestConfig)
   axiosInstance.interceptors.request.use(requestInterceptor({}));
   axiosInstance.interceptors.response.use(
     (response) => {
-      logger.info(`[HTTP][RES][${response.config.method.toUpperCase()}][${response.status}]`, response.config.url, {
+      logger.info(`[HTTP][RES][${response.config.method?.toUpperCase()}][${response.status}]`, response.config.url, {
+        requestId: response.headers['x-request-id'],
         response: response.data,
       });
       return response;
     },
     (error: AxiosError) => {
-      logger.info('[HTTP][RESPONSE][ERROR]', error.name, error.message);
+      logger.error('[HTTP][RESPONSE][ERROR]', {
+        requestId: response.headers['x-request-id'],
+        errorName: error.name,
+        errorMessage: error.message,
+      });
       let message = 'An unknown error has occurred';
       if (error.isAxiosError && error.response) {
         message = error.message || 'An unknown error has occurred';
+        logger.error(`[HTTP][RES][${response.config.method?.toUpperCase()}][${response.status}]`, response.config.url, {
+          response: response.data,
+        });
       }
       throw new Error(message);
     }
@@ -62,25 +101,15 @@ export async function handleExternalRequest<T = any>(config: AxiosRequestConfig)
   return response;
 }
 
-export async function handleRequest<T = any>(
-  config: AxiosRequestConfig,
-  options: {
-    org?: SalesforceOrgUi;
-    targetOrg?: SalesforceOrgUi;
-    mockHeaderKey?: string;
-    useCache?: boolean;
-    skipRequestCache?: boolean;
-    skipCacheIfOlderThan?: number;
-    useQueryParamsInCacheKey?: boolean;
-    useBodyInCacheKey?: boolean;
-  } = {}
-): Promise<ApiResponse<T>> {
+export async function handleRequest<T = any>(config: AxiosRequestConfig, options: RequestOptions = {}): Promise<ApiResponse<T>> {
   if (options.mockHeaderKey && isString(options.mockHeaderKey)) {
     config.headers = config.headers || {};
     config.headers[HTTP.HEADERS.X_MOCK_KEY] = options.mockHeaderKey;
   }
+  options.retryCount = options.retryCount || 0;
   const axiosInstance = axios.create({ ...baseConfig, ...config });
   axiosInstance.interceptors.request.use(requestInterceptor(options));
+  axiosInstance.interceptors.response.use(null, retryInterceptor(config, options));
   axiosInstance.interceptors.response.use(responseInterceptor(options), responseErrorInterceptor(options));
   const response = await axiosInstance.request<ApiResponse<T>>(config);
   return response.data;
@@ -91,20 +120,14 @@ export async function handleRequest<T = any>(
  * Add authentication and org info
  * Optionally returned cached response instead of actual response
  */
-function requestInterceptor<T>(options: {
-  org?: SalesforceOrgUi;
-  targetOrg?: SalesforceOrgUi;
-  useCache?: boolean;
-  skipRequestCache?: boolean;
-  skipCacheIfOlderThan?: number;
-  useQueryParamsInCacheKey?: boolean;
-  useBodyInCacheKey?: boolean;
-}) {
-  return async (config: AxiosRequestConfig) => {
-    logger.info(`[HTTP][REQ][${config.method.toUpperCase()}]`, config.url, { request: config });
+function requestInterceptor<T>(options: RequestOptions) {
+  return async (config: InternalAxiosRequestConfig) => {
+    logger.info(`[HTTP][REQ][${config.method?.toUpperCase()}]`, config.url, { request: config });
     const { org, targetOrg, useCache, skipRequestCache, skipCacheIfOlderThan, useQueryParamsInCacheKey, useBodyInCacheKey } = options;
     // add request headers
-    config.headers = config.headers || {};
+    config.headers = config.headers || ({} as any);
+    config.headers[HTTP.HEADERS.X_CLIENT_REQUEST_ID] = config.headers[HTTP.HEADERS.X_CLIENT_REQUEST_ID] || uuid();
+
     if (!config.headers[HTTP.HEADERS.ACCEPT]) {
       config.headers[HTTP.HEADERS.ACCEPT] = HTTP.CONTENT_TYPE.JSON;
     }
@@ -119,10 +142,10 @@ function requestInterceptor<T>(options: {
 
     // IF mock response header exists and mock response exists, return data instead of making actual request
     if (config.headers[HTTP.HEADERS.X_MOCK_KEY] && SOBJECT_DESCRIBE_CACHED_RESPONSES[config.headers[HTTP.HEADERS.X_MOCK_KEY] as string]) {
-      config.adapter = (config: AxiosRequestConfig) => {
+      config.adapter = (config: InternalAxiosRequestConfig) => {
         return new Promise((resolve) => {
           resolve({
-            data: SOBJECT_DESCRIBE_CACHED_RESPONSES[config.headers[HTTP.HEADERS.X_MOCK_KEY] as string],
+            data: SOBJECT_DESCRIBE_CACHED_RESPONSES[config.headers?.[HTTP.HEADERS.X_MOCK_KEY] as string],
             status: 200,
             statusText: 'OK',
             headers: {},
@@ -136,7 +159,7 @@ function requestInterceptor<T>(options: {
       if (cachedResults) {
         // if skipCacheIfOlderThan is provided, then see if cache is older than provided date and skip cache if so
         if (!skipCacheIfOlderThan || (Number.isFinite(skipCacheIfOlderThan) && cachedResults.age >= skipCacheIfOlderThan)) {
-          config.adapter = async (config: AxiosRequestConfig) => {
+          config.adapter = async (config: InternalAxiosRequestConfig) => {
             return new Promise((resolve) => {
               resolve({
                 config,
@@ -169,21 +192,48 @@ function requestInterceptor<T>(options: {
 }
 
 /**
+ * Retry error responses if needed
+ * Caller must set options.retry to true to enable retry
+ */
+function retryInterceptor(config: AxiosRequestConfig, options: RequestOptions = {}) {
+  return async (error: AxiosError) => {
+    let { retryCount } = options;
+    retryCount = retryCount || 0;
+    const { endpoints, retry, retryDelay, methods, statusCodes } = RETRY_CONFIG;
+    if (
+      retryCount <= retry &&
+      methods.has(config.method || '') &&
+      statusCodes.has(error.response?.status || -1) &&
+      endpoints.some((endpoint) => endpoint.test(config.url || ''))
+    ) {
+      retryCount++;
+      await delay(retryDelay(retryCount));
+      logger.warn(`[HTTP][RETRYING REQUEST]`, config.url, { retryCount, error: error.message });
+
+      options = { ...options, retryCount: retryCount };
+      config.headers = { ...config.headers, [HTTP.HEADERS.X_RETRY]: String(retryCount) };
+      const axiosInstance = axios.create({ ...config });
+      axiosInstance.interceptors.request.use(requestInterceptor(options));
+      axiosInstance.interceptors.response.use(responseInterceptor(options), responseErrorInterceptor(options));
+      return await axiosInstance.request(config);
+    }
+    return Promise.reject(error);
+  };
+}
+
+/**
  * Handle successful responses
  */
-function responseInterceptor<T>(options: {
-  org?: SalesforceOrgUi;
-  useCache?: boolean;
-  useQueryParamsInCacheKey?: boolean;
-  useBodyInCacheKey?: boolean;
-}): (response: AxiosResponse) => Promise<AxiosResponse<T>> {
+function responseInterceptor<T>(options: RequestOptions): (response: AxiosResponse) => Promise<AxiosResponse<T>> {
   return async (response: AxiosResponse) => {
     const { org, useCache, useQueryParamsInCacheKey, useBodyInCacheKey } = options;
     const cachedResponse = getHeader(response.headers, HTTP.HEADERS.X_CACHE_RESPONSE) === '1';
     if (cachedResponse) {
-      logger.info(`[HTTP][RES][${response.config.method.toUpperCase()}][CACHE]`, response.config.url, { response: response.data });
+      logger.info(`[HTTP][RES][${response.config.method?.toUpperCase()}][CACHE]`, response.config.url, { response: response.data });
     } else {
-      logger.info(`[HTTP][RES][${response.config.method.toUpperCase()}][${response.status}]`, response.config.url, {
+      logger.info(`[HTTP][RES][${response.config.method?.toUpperCase()}][${response.status}]`, response.config.url, {
+        clientRequestId: response.headers['x-client-request-id'],
+        requestId: response.headers['x-request-id'],
         response: response.data,
       });
     }
@@ -219,14 +269,19 @@ function responseErrorInterceptor<T>(options: {
 }) {
   return (error: AxiosError) => {
     const { org } = options;
-    logger.info('[HTTP][RESPONSE][ERROR]', error.name, error.message);
+    logger.error('[HTTP][RESPONSE][ERROR]', error.name, error.message);
     let message = 'An unknown error has occurred';
     if (error.isAxiosError && error.response) {
       const response = error.response as AxiosResponse<{ error: boolean; message: string }>;
+      logger.error(`[HTTP][RES][${response.config.method?.toUpperCase()}][${response.status}]`, response.config.url, {
+        clientRequestId: response.headers['x-client-request-id'],
+        requestId: response.headers['x-request-id'],
+        response: response.data,
+      });
       // Run middleware for error responses
       errorMiddleware.forEach((middleware) => middleware(response, org));
-      const responseBody: { error: boolean; message: string } = response.data;
-      message = responseBody.message || 'An unknown error has occurred';
+      const responseBody: { error: boolean; message: string } = response.data || { error: true, message: 'An unknown error has occurred' };
+      message = responseBody?.message || 'An unknown error has occurred';
       // take user to login page
       if (getHeader(response.headers, HTTP.HEADERS.X_LOGOUT) === '1') {
         // LOG USER OUT

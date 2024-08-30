@@ -1,7 +1,18 @@
+/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import { ensureBoolean, ensureStringValue } from '@jetstream/shared/utils';
-import { UserProfileServer } from '@jetstream/types';
+import { UserProfileServer, UserProfileUi } from '@jetstream/types';
 import * as dotenv from 'dotenv';
+import { readFileSync } from 'fs-extra';
+import { join } from 'path';
 dotenv.config();
+
+let VERSION = 'unknown';
+try {
+  VERSION = readFileSync(join(__dirname, '../../VERSION'), 'utf-8').trim();
+  console.warn(`APP VERSION ${VERSION}`);
+} catch (ex) {
+  console.warn('COULD NOT READ VERSION FILE', ex.message);
+}
 
 /**
  * This object allows for someone to run Jetstream in a local environment
@@ -31,22 +42,36 @@ const EXAMPLE_USER: UserProfileServer = {
   user_id: 'EXAMPLE_USER',
 };
 
+const EXAMPLE_USER_PROFILE: UserProfileUi = {
+  ...EXAMPLE_USER._json,
+  id: 'EXAMPLE_USER',
+  userId: 'EXAMPLE_USER',
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  preferences: { skipFrontdoorLogin: false },
+};
+
 export const ENV = {
+  LOG_LEVEL: (process.env.LOG_LEVEL || 'debug') as 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal' | 'silent',
   IS_CI: ensureBoolean(process.env.CI),
   // LOCAL OVERRIDE
   EXAMPLE_USER_OVERRIDE: ensureBoolean(process.env.EXAMPLE_USER_OVERRIDE),
   EXAMPLE_USER: process.env.EXAMPLE_USER_OVERRIDE ? EXAMPLE_USER : null,
+  EXAMPLE_USER_PROFILE: process.env.EXAMPLE_USER_OVERRIDE ? EXAMPLE_USER_PROFILE : null,
+  IS_LOCAL_DOCKER: process.env.IS_LOCAL_DOCKER || false,
   // SYSTEM
   NODE_ENV: process.env.NODE_ENV,
   ENVIRONMENT: process.env.ENVIRONMENT || 'production',
   PORT: process.env.port || 3333,
-  GIT_VERSION: process.env.GIT_VERSION,
+  GIT_VERSION: VERSION,
   ROLLBAR_SERVER_TOKEN: process.env.ROLLBAR_SERVER_TOKEN,
   // JETSTREAM
   JETSTREAM_SERVER_DOMAIN: process.env.JETSTREAM_SERVER_DOMAIN,
-  JESTREAM_SESSION_SECRET: process.env.JESTREAM_SESSION_SECRET,
+  // FIXME: there was a typo in env variables, using both temporarily as a safe fallback
+  JETSTREAM_SESSION_SECRET: process.env.JETSTREAM_SESSION_SECRET || '',
   JETSTREAM_SERVER_URL: process.env.JETSTREAM_SERVER_URL,
-  JESTREAM_POSTGRES_DBURI: process.env.JESTREAM_POSTGRES_DBURI,
+  // FIXME: there was a typo in env variables, using both temporarily as a safe fallback
+  JETSTREAM_POSTGRES_DBURI: process.env.JETSTREAM_POSTGRES_DBURI,
   JETSTREAM_CLIENT_URL: process.env.JETSTREAM_CLIENT_URL,
   JETSTREAM_WORKER_URL: process.env.JETSTREAM_WORKER_URL,
   PRISMA_DEBUG: ensureBoolean(process.env.PRISMA_DEBUG),
@@ -64,10 +89,10 @@ export const ENV = {
   MAILGUN_PUBLIC_KEY: process.env.MAILGUN_PUBLIC_KEY,
   MAILGUN_WEBHOOK_KEY: process.env.MAILGUN_WEBHOOK_KEY,
   // SFDC
-  SFDC_FALLBACK_API_VERSION: process.env.NX_SFDC_API_VERSION || process.env.SFDC_FALLBACK_API_VERSION,
-  SFDC_CONSUMER_SECRET: process.env.SFDC_CONSUMER_SECRET,
-  SFDC_CONSUMER_KEY: process.env.SFDC_CONSUMER_KEY,
-  SFDC_CALLBACK_URL: process.env.SFDC_CALLBACK_URL,
+  SFDC_API_VERSION: process.env.NX_SFDC_API_VERSION || process.env.SFDC_API_VERSION || '58.0',
+  SFDC_CONSUMER_SECRET: process.env.SFDC_CONSUMER_SECRET!,
+  SFDC_CONSUMER_KEY: process.env.SFDC_CONSUMER_KEY!,
+  SFDC_CALLBACK_URL: process.env.SFDC_CALLBACK_URL!,
   // GOOGLE
   GOOGLE_APP_ID: process.env.GOOGLE_APP_ID,
   GOOGLE_API_KEY: process.env.GOOGLE_API_KEY,
@@ -77,5 +102,5 @@ export const ENV = {
   // HONEYCOMB
   HONEYCOMB_ENABLED: ensureBoolean(process.env.HONEYCOMB_ENABLED),
   HONEYCOMB_API_KEY: process.env.HONEYCOMB_API_KEY,
-  AUTH_AUDIENCE: process.env.NX_AUTH_AUDIENCE,
+  AUTH_AUDIENCE: process.env.NX_PUBLIC_AUTH_AUDIENCE,
 };

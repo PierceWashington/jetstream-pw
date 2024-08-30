@@ -77,7 +77,7 @@ export function selectMenuItemFromKeyboard<T = ListItem>({
   /* Copyright (c) 2015-present, salesforce.com, inc. All rights reserved */
   /* Licensed under BSD 3-Clause - see LICENSE.txt or git.io/sfdc-license */
   // https://github.com/salesforce/design-system-react/blob/master/utilities/key-letter-menu-item-select.js
-  let ch = key || String.fromCharCode(keyCode);
+  let ch: string | null = key || String.fromCharCode(keyCode);
 
   if (/^[ -~]$/.test(ch)) {
     ch = ch.toLowerCase();
@@ -85,12 +85,12 @@ export function selectMenuItemFromKeyboard<T = ListItem>({
     ch = null;
   }
 
-  const pattern = keyBuffer.getValue(ch);
+  const pattern = ch ? keyBuffer.getValue(ch) : '';
   let consecutive = 0;
-  let focusedIndex: number;
+  let focusedIndex: number | undefined = undefined;
 
   // Support for navigating to the next option of the same letter with repeated presses of the same key
-  if (pattern.length > 1 && new RegExp(`^[${escapeRegExp(ch)}]+$`).test(pattern)) {
+  if (ch && pattern.length > 1 && new RegExp(`^[${escapeRegExp(ch)}]+$`).test(pattern)) {
     consecutive = pattern.length;
   }
 
@@ -106,7 +106,7 @@ export function selectMenuItemFromKeyboard<T = ListItem>({
     }
   });
 
-  return focusedIndex;
+  return focusedIndex ?? 0;
 }
 
 export function isAlphaNumericKey(event: KeyboardEvent<unknown>): boolean {
@@ -132,6 +132,10 @@ export function isKKey(event: KeyboardEvent<unknown>): boolean {
 
 export function isMKey(event: KeyboardEvent<unknown>): boolean {
   return event.key === 'm' || event.key === 'M' || event.keyCode === 77;
+}
+
+export function isVKey(event: KeyboardEvent<unknown>): boolean {
+  return event.key === 'v' || event.code === 'KeyV' || event.keyCode === 86;
 }
 
 export function isArrowKey(event: KeyboardEvent<unknown>): boolean {
@@ -171,6 +175,17 @@ export function isEnterOrSpace(event: KeyboardEvent<unknown>): boolean {
 
 export function isEscapeKey(event: KeyboardEvent<unknown>): boolean {
   return event.key === 'Escape' || event.keyCode === 27;
+}
+export function isBackspaceKey(event: KeyboardEvent<unknown>): boolean {
+  return event.key === 'Delete' || event.keyCode === 46;
+}
+
+export function isDeleteKey(event: KeyboardEvent<unknown>): boolean {
+  return event.key === 'Backspace' || event.keyCode === 8;
+}
+
+export function isBackspaceOrDeleteKey(event: KeyboardEvent<unknown>): boolean {
+  return isBackspaceKey(event) || isDeleteKey(event);
 }
 
 export function isPageUpKey(event: KeyboardEvent<unknown>): boolean {

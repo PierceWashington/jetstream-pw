@@ -1,16 +1,17 @@
 import { css } from '@emotion/react';
 import { IconName } from '@jetstream/icon-factory';
-import { useDebounce } from '@jetstream/shared/ui-utils';
+import { isValidSalesforceRecordId, useDebounce } from '@jetstream/shared/ui-utils';
 import { multiWordStringFilter } from '@jetstream/shared/utils';
-import { ListItem, SalesforceOrgUi } from '@jetstream/types';
+import { CloneEditView, ListItem, SalesforceOrgUi } from '@jetstream/types';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import classNames from 'classnames';
-import formatISO from 'date-fns/formatISO';
-import parseISO from 'date-fns/parseISO';
-import { isBoolean, isFunction } from 'lodash';
-import { Fragment, FunctionComponent, MutableRefObject, useContext, useEffect, useRef, useState } from 'react';
-import { FormatterProps, GroupFormatterProps, headerRenderer, HeaderRendererProps, useFocusRef, useRowSelection } from 'react-data-grid';
-import { useDrag, useDrop } from 'react-dnd';
+import { formatISO } from 'date-fns/formatISO';
+import { parseISO } from 'date-fns/parseISO';
+import isBoolean from 'lodash/isBoolean';
+import isFunction from 'lodash/isFunction';
+import isString from 'lodash/isString';
+import { Fragment, FunctionComponent, MutableRefObject, memo, useContext, useEffect, useRef, useState } from 'react';
+import { RenderCellProps, RenderGroupCellProps, RenderHeaderCellProps, useRowSelection } from 'react-data-grid';
 import Checkbox from '../form/checkbox/Checkbox';
 import DatePicker from '../form/date/DatePicker';
 import Input from '../form/input/Input';
@@ -21,9 +22,10 @@ import Modal from '../modal/Modal';
 import Popover, { PopoverRef } from '../popover/Popover';
 import CopyToClipboard from '../widgets/CopyToClipboard';
 import Icon from '../widgets/Icon';
-import SalesforceLogin from '../widgets/SalesforceLogin';
+import RecordLookupPopover from '../widgets/RecordLookupPopover';
 import Spinner from '../widgets/Spinner';
-import { DataTableFilterContext, DataTableSelectedContext } from './data-table-context';
+import Tooltip from '../widgets/Tooltip';
+import { DataTableFilterContext, DataTableGenericContext, DataTableSelectedContext } from './data-table-context';
 import { dataTableDateFormatter } from './data-table-formatters';
 import {
   DataTableBooleanSetFilter,
@@ -40,84 +42,41 @@ import { getRowId, getSfdcRetUrl, isFilterActive, resetFilter } from './data-tab
 
 let _serverUrl: string;
 let _org: SalesforceOrgUi;
+let _skipFrontdoorLogin = false;
 
-export function configIdLinkRenderer(serverUrl: string, org: SalesforceOrgUi) {
+export function configIdLinkRenderer(serverUrl: string, org: SalesforceOrgUi, skipFrontdoorLogin?: boolean) {
   if (_serverUrl !== serverUrl) {
     _serverUrl = serverUrl;
   }
   if (_org !== org) {
     _org = org;
   }
+  _skipFrontdoorLogin = skipFrontdoorLogin ?? _skipFrontdoorLogin;
 }
 
 // HEADER RENDERERS
 
 /**
- * DRAGGABLE COLUMNS, ALLOW REORDERING
- */
-interface DraggableHeaderRendererProps<R> extends HeaderRendererProps<R> {
-  onColumnsReorder: (sourceKey: string, targetKey: string) => void;
-}
-
-export function DraggableHeaderRenderer<R>({ onColumnsReorder, column, ...props }: DraggableHeaderRendererProps<R>) {
-  const [{ isDragging }, drag] = useDrag({
-    type: 'COLUMN_DRAG',
-    item: { key: column.key },
-    collect: (monitor) => ({
-      isDragging: monitor.isDragging(),
-    }),
-  });
-
-  const [{ isOver }, drop] = useDrop({
-    accept: 'COLUMN_DRAG',
-    drop({ key }: { key: string }) {
-      onColumnsReorder(key, column.key);
-    },
-    collect: (monitor) => ({
-      isOver: monitor.isOver(),
-      canDrop: monitor.canDrop(),
-    }),
-  });
-
-  return (
-    <div
-      ref={(ref) => {
-        drag(ref);
-        drop(ref);
-      }}
-      style={{
-        opacity: isDragging ? 0.5 : 1,
-        backgroundColor: isOver ? '#ececec' : undefined,
-        cursor: isDragging ? 'move' : undefined,
-      }}
-    >
-      {(column as any)._priorHeaderRenderer
-        ? (column as any)._priorHeaderRenderer({ column, ...props })
-        : headerRenderer({ column, ...props })}
-    </div>
-  );
-}
-
-/**
  * SELECT ALL CHECKBOX HEADER
  */
-export function SelectHeaderRenderer<T>(props: HeaderRendererProps<T>) {
-  const { column, allRowsSelected, onAllRowsSelectionChange } = props;
+export function SelectHeaderRenderer<T>(props: RenderHeaderCellProps<T>) {
+  const { column } = props;
+  const [isRowSelected, onRowSelectionChange] = useRowSelection();
 
   return (
     <Checkbox
       id={`checkbox-${column.name}_header`} // TODO: need way to get row id
       label="Select all"
       hideLabel
-      checked={allRowsSelected}
-      onChange={(checked) => onAllRowsSelectionChange(checked)}
+      checked={isRowSelected}
+      onChange={(checked) => onRowSelectionChange({ type: 'HEADER', checked })}
       // WAITING ON: https://github.com/adazzle/react-data-grid/issues/3058
       // indeterminate={props.row.getIsSomeSelected()}
     />
   );
 }
 
-export function SelectHeaderGroupRenderer<T>(props: GroupFormatterProps<T>) {
+export function SelectHeaderGroupRenderer<T>(props: RenderGroupCellProps<T>) {
   const { column, groupKey, row, childRows } = props;
   const [isRowSelected, onRowSelectionChange] = useRowSelection();
 
@@ -130,7 +89,7 @@ export function SelectHeaderGroupRenderer<T>(props: GroupFormatterProps<T>) {
           hideLabel
           checked={isRowSelected}
           indeterminate={selectedRowIds.size > 0 && childRows.some((childRow) => selectedRowIds.has((getRowKey || getRowId)(childRow)))}
-          onChange={(checked) => onRowSelectionChange({ row: row, checked, isShiftClick: false })}
+          onChange={(checked) => onRowSelectionChange({ type: 'ROW', row: row, checked, isShiftClick: false })}
         />
       )}
     </DataTableSelectedContext.Consumer>
@@ -138,12 +97,10 @@ export function SelectHeaderGroupRenderer<T>(props: GroupFormatterProps<T>) {
 }
 
 export function FilterRenderer<R, SR, T extends HTMLOrSVGElement>({
-  isCellSelected,
-  onSort,
   sortDirection,
   column,
   children,
-}: HeaderRendererProps<R, SR> & {
+}: RenderHeaderCellProps<R, SR> & {
   children: (
     args: HeaderFilterProps & {
       ref?: React.RefObject<T>;
@@ -152,20 +109,16 @@ export function FilterRenderer<R, SR, T extends HTMLOrSVGElement>({
   ) => React.ReactElement;
 }) {
   const { filters, filterSetValues, portalRefForFilters, updateFilter } = useContext(DataTableFilterContext);
-  const { ref, tabIndex } = useFocusRef<T>(isCellSelected);
 
-  // TODO: sort and filter
   const iconName: IconName = sortDirection === 'ASC' ? 'arrowup' : 'arrowdown';
 
   return (
-    <div className="slds-grid slds-grid_align-spread slds-grid_vertical-align-center cursor-pointer" onClick={() => onSort(false)}>
+    <div className="slds-grid slds-grid_align-spread slds-grid_vertical-align-center cursor-pointer">
       <div className="slds-truncate">{column.name}</div>
       <div className="slds-grid slds-grid_vertical-align-center">
         {sortDirection && <Icon type="utility" icon={iconName} className="slds-icon slds-icon-text-default slds-icon_xx-small" />}
         <div>
           {children({
-            ref,
-            tabIndex,
             columnKey: column.key,
             filters: filters[column.key],
             filterSetValues,
@@ -206,8 +159,8 @@ interface HeaderFilterProps {
   updateFilter: (column: string, filter: DataTableFilter) => void;
 }
 
-export function HeaderFilter({ columnKey, filters, filterSetValues, portalRefForFilters, updateFilter }: HeaderFilterProps) {
-  const popoverRef = useRef<PopoverRef>();
+export const HeaderFilter = memo(({ columnKey, filters, filterSetValues, portalRefForFilters, updateFilter }: HeaderFilterProps) => {
+  const popoverRef = useRef<PopoverRef>(null);
 
   const [active, setActive] = useState(false);
 
@@ -253,6 +206,7 @@ export function HeaderFilter({ columnKey, filters, filterSetValues, portalRefFor
         ev.stopPropagation();
       }}
       onPointerDown={(ev) => ev.stopPropagation()}
+      onKeyDown={(ev) => ev.stopPropagation()}
     >
       <Popover
         ref={popoverRef}
@@ -270,7 +224,7 @@ export function HeaderFilter({ columnKey, filters, filterSetValues, portalRefFor
           </footer>
         }
         content={
-          <div css={css``} onPointerDown={(ev) => ev.stopPropagation()}>
+          <div onPointerDown={(ev) => ev.stopPropagation()}>
             {filters
               .filter((filter) => filter.type)
               .map((filter, i) => (
@@ -296,7 +250,7 @@ export function HeaderFilter({ columnKey, filters, filterSetValues, portalRefFor
       </Popover>
     </div>
   );
-}
+});
 
 interface DataTableTextFilterProps {
   columnKey: string;
@@ -305,7 +259,7 @@ interface DataTableTextFilterProps {
   updateFilter: (column: string, filter: DataTableFilter) => void;
 }
 
-export function HeaderTextFilter({ columnKey, filter, autoFocus = false, updateFilter }: DataTableTextFilterProps) {
+export const HeaderTextFilter = memo(({ columnKey, filter, autoFocus = false, updateFilter }: DataTableTextFilterProps) => {
   const [value, setValue] = useState(filter.value);
   const debouncedValue = useDebounce(value, 300);
 
@@ -320,7 +274,7 @@ export function HeaderTextFilter({ columnKey, filter, autoFocus = false, updateF
       <input className="slds-input" value={value} onChange={(ev) => setValue(ev.target.value)} autoFocus={autoFocus} />
     </Input>
   );
-}
+});
 
 interface HeaderSetFilterProps {
   columnKey: string;
@@ -329,7 +283,7 @@ interface HeaderSetFilterProps {
   updateFilter: (column: string, filter: DataTableFilter) => void;
 }
 
-export function HeaderSetFilter({ columnKey, filter, values, updateFilter }: HeaderSetFilterProps) {
+export const HeaderSetFilter = memo(({ columnKey, filter, values, updateFilter }: HeaderSetFilterProps) => {
   const parentRef = useRef<HTMLDivElement>(null);
   const [selectedValues, setSelectedValues] = useState(() => new Set<string>(filter.value));
   const [visibleItems, setVisibleItems] = useState(values);
@@ -434,7 +388,7 @@ export function HeaderSetFilter({ columnKey, filter, values, updateFilter }: Hea
       )}
     </div>
   );
-}
+});
 
 interface DataTableDateFilterProps {
   columnKey: string;
@@ -442,7 +396,7 @@ interface DataTableDateFilterProps {
   updateFilter: (column: string, filter: DataTableFilter) => void;
 }
 
-export function HeaderDateFilter({ columnKey, filter, updateFilter }: DataTableDateFilterProps) {
+export const HeaderDateFilter = memo(({ columnKey, filter, updateFilter }: DataTableDateFilterProps) => {
   const [value, setValue] = useState(() => (filter.value ? parseISO(filter.value) : null));
   const [comparators] = useState<ListItem<string, 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN'>[]>(() => [
     { id: 'EQUALS', label: 'Equals', value: 'EQUALS' },
@@ -477,12 +431,12 @@ export function HeaderDateFilter({ columnKey, filter, updateFilter }: DataTableD
         label="Date Range"
         hideLabel
         className="slds-m-top_small w-100"
-        initialSelectedDate={value}
+        initialSelectedDate={value || undefined}
         onChange={handleDateChange}
       />
     </div>
   );
-}
+});
 
 interface HeaderTimeFilterProps {
   columnKey: string;
@@ -490,7 +444,7 @@ interface HeaderTimeFilterProps {
   updateFilter: (column: string, filter: DataTableFilter) => void;
 }
 
-export function HeaderTimeFilter({ columnKey, filter, updateFilter }: HeaderTimeFilterProps) {
+export const HeaderTimeFilter = memo(({ columnKey, filter, updateFilter }: HeaderTimeFilterProps) => {
   const [value, setValue] = useState(() => filter.value);
   const [comparators] = useState<ListItem<string, 'EQUALS' | 'GREATER_THAN' | 'LESS_THAN'>[]>(() => [
     { id: 'EQUALS', label: 'Equals', value: 'EQUALS' },
@@ -531,12 +485,12 @@ export function HeaderTimeFilter({ columnKey, filter, updateFilter }: HeaderTime
       />
     </div>
   );
-}
+});
 
 // CELL RENDERERS
 /** Generic cell renderer when the type of data is unknown */
-export function GenericRenderer(formatterProps: FormatterProps<RowWithKey>) {
-  const { column, row } = formatterProps;
+export function GenericRenderer(RenderCellProps: RenderCellProps<RowWithKey>) {
+  const { column, row } = RenderCellProps;
 
   if (!row) {
     return <div />;
@@ -547,15 +501,15 @@ export function GenericRenderer(formatterProps: FormatterProps<RowWithKey>) {
   if (value instanceof Date) {
     value = dataTableDateFormatter(value);
   } else if (isBoolean(value)) {
-    return <BooleanRenderer {...formatterProps} />;
+    return <BooleanRenderer {...RenderCellProps} />;
   } else if (value && typeof value === 'object') {
-    value = <ComplexDataRenderer {...formatterProps} />;
+    value = <ComplexDataRenderer {...RenderCellProps} />;
   }
 
   return <div className="slds-truncate">{value}</div>;
 }
 
-export function SelectFormatter<T>(props: FormatterProps<T>) {
+export function SelectFormatter<T>(props: RenderCellProps<T>) {
   const { column, row } = props;
   const [isRowSelected, onRowSelectionChange] = useRowSelection();
 
@@ -565,12 +519,12 @@ export function SelectFormatter<T>(props: FormatterProps<T>) {
       label="Select row"
       hideLabel
       checked={isRowSelected}
-      onChange={(checked) => onRowSelectionChange({ row, checked, isShiftClick: false })}
+      onChange={(checked) => onRowSelectionChange({ type: 'ROW', row, checked, isShiftClick: false })}
     />
   );
 }
 
-export function ValueOrLoadingRenderer<T extends { loading: boolean }>({ column, row }: FormatterProps<T>) {
+export function ValueOrLoadingRenderer<T extends { loading: boolean }>({ column, row }: RenderCellProps<T>) {
   if (!row) {
     return <div />;
   }
@@ -582,7 +536,7 @@ export function ValueOrLoadingRenderer<T extends { loading: boolean }>({ column,
   return <div>{value}</div>;
 }
 
-export const ComplexDataRenderer: FunctionComponent<FormatterProps<RowWithKey, unknown>> = ({ column, row }) => {
+export const ComplexDataRenderer: FunctionComponent<RenderCellProps<RowWithKey, unknown>> = ({ column, row }) => {
   const value = row[column.key];
   const [isActive, setIsActive] = useState(false);
   const [jsonValue] = useState(JSON.stringify(value || '', null, 2));
@@ -626,17 +580,46 @@ export const ComplexDataRenderer: FunctionComponent<FormatterProps<RowWithKey, u
   );
 };
 
-export const IdLinkRenderer: FunctionComponent<FormatterProps<any, unknown>> = ({ column, row, onRowChange, isCellSelected }) => {
-  const value = row[column.key];
-  const { skipFrontDoorAuth, url } = column.key === 'Id' ? getSfdcRetUrl(value, row) : { skipFrontDoorAuth: false, url: `/${value}` };
+export const IdLinkRenderer: FunctionComponent<RenderCellProps<any, unknown>> = ({ column, row }) => {
+  const { onRecordAction, portalRefForFilters } = useContext(DataTableGenericContext) as {
+    onRecordAction?: (action: CloneEditView, recordId: string, sobjectName: string) => void;
+    portalRefForFilters?: MutableRefObject<HTMLElement>;
+  };
+  const recordId = row[column.key];
+  const { skipFrontDoorAuth, url } = getSfdcRetUrl(row, recordId, _skipFrontdoorLogin);
   return (
-    <div className="slds-truncate" title={`${value}`}>
-      <SalesforceLogin serverUrl={_serverUrl} org={_org} returnUrl={url} skipFrontDoorAuth={skipFrontDoorAuth} omitIcon>
-        {value}
-      </SalesforceLogin>
-    </div>
+    <RecordLookupPopover
+      org={_org}
+      serverUrl={_serverUrl}
+      recordId={recordId}
+      skipFrontDoorAuth={skipFrontDoorAuth}
+      returnUrl={url}
+      isTooling={false}
+      portalRef={portalRefForFilters?.current}
+      onRecordAction={onRecordAction}
+    />
   );
 };
+
+export function TextOrIdLinkRenderer(RenderCellProps: RenderCellProps<RowWithKey>) {
+  const { column, row } = RenderCellProps;
+
+  if (!row) {
+    return <div />;
+  }
+
+  const maybeSalesforceId = row[column.key];
+
+  if (_org && isString(maybeSalesforceId) && maybeSalesforceId.length === 18 && isValidSalesforceRecordId(maybeSalesforceId, false)) {
+    return (
+      <a href={`${_org.instanceUrl}/${maybeSalesforceId}`} target="_blank" rel="noopener noreferrer">
+        {maybeSalesforceId}
+      </a>
+    );
+  }
+
+  return GenericRenderer(RenderCellProps);
+}
 
 export const ActionRenderer: FunctionComponent<{ row: any }> = ({ row }) => {
   if (!isFunction(row?._action)) {
@@ -644,23 +627,37 @@ export const ActionRenderer: FunctionComponent<{ row: any }> = ({ row }) => {
   }
   return (
     <Fragment>
-      <button className="slds-button slds-button_icon" title="View Full Record" onClick={() => row._action(row, 'view')}>
-        <Icon type="utility" icon="preview" className="slds-button__icon " omitContainer />
-      </button>
-      <button className="slds-button slds-button_icon" title="Edit Record" onClick={() => row._action(row, 'edit')}>
-        <Icon type="utility" icon="edit" className="slds-button__icon " omitContainer />
-      </button>
-      <button className="slds-button slds-button_icon" title="Clone Record" onClick={() => row._action(row, 'clone')}>
-        <Icon type="utility" icon="copy" className="slds-button__icon " omitContainer />
-      </button>
-      <button className="slds-button slds-button_icon" title="Turn Record Into Apex" onClick={() => row._action(row, 'apex')}>
-        <Icon type="utility" icon="apex" className="slds-button__icon " omitContainer />
-      </button>
+      <ErrorMessageRenderer row={row} />
+      <Tooltip content="View full record">
+        <button className="slds-button slds-button_icon slds-m-right_xx-small" onClick={() => row._action(row, 'view')}>
+          <Icon type="utility" icon="preview" className="slds-button__icon" omitContainer />
+        </button>
+      </Tooltip>
+      <Tooltip content="Edit">
+        <button className="slds-button slds-button_icon slds-m-right_xx-small" onClick={() => row._action(row, 'edit')}>
+          <Icon type="utility" icon="edit" className="slds-button__icon" omitContainer />
+        </button>
+      </Tooltip>
+      <Tooltip content="Clone">
+        <button className="slds-button slds-button_icon slds-m-right_xx-small" onClick={() => row._action(row, 'clone')}>
+          <Icon type="utility" icon="copy" className="slds-button__icon" omitContainer />
+        </button>
+      </Tooltip>
+      <Tooltip content="Delete">
+        <button className="slds-button slds-button_icon slds-m-right_xx-small" onClick={() => row._action(row, 'delete')}>
+          <Icon type="utility" icon="delete" className="slds-button__icon" omitContainer />
+        </button>
+      </Tooltip>
+      <Tooltip content="Turn Into Apex">
+        <button className="slds-button slds-button_icon" onClick={() => row._action(row, 'apex')}>
+          <Icon type="utility" icon="apex" className="slds-button__icon" omitContainer />
+        </button>
+      </Tooltip>
     </Fragment>
   );
 };
 
-export const BooleanRenderer: FunctionComponent<FormatterProps<any, unknown>> = ({ column, row, onRowChange, isCellSelected }) => {
+export const BooleanRenderer: FunctionComponent<RenderCellProps<any, unknown>> = ({ column, row }) => {
   const value = row[column.key];
   return (
     <Checkbox
@@ -671,5 +668,48 @@ export const BooleanRenderer: FunctionComponent<FormatterProps<any, unknown>> = 
       hideLabel
       readOnly
     />
+  );
+};
+
+export const ErrorMessageRenderer: FunctionComponent<{ row: any }> = ({ row }) => {
+  if (!row?._saveError) {
+    return null;
+  }
+  return (
+    <Popover
+      containerClassName="slds-popover_error"
+      inverseIcons
+      header={
+        <header className="slds-popover__header">
+          <div className="slds-media slds-media_center slds-has-flexi-truncate">
+            <div className="slds-media__figure">
+              <Icon
+                type="utility"
+                icon="error"
+                className="slds-icon slds-icon_x-small"
+                containerClassname="slds-icon_container slds-icon-utility-error"
+              />
+            </div>
+            <div className="slds-media__body">
+              <h2 className="slds-truncate slds-text-heading_medium" id="dialog-heading-id-2" title="Resolve error">
+                Save Error
+              </h2>
+            </div>
+          </div>
+        </header>
+      }
+      content={
+        <div
+          css={css`
+            max-height: 80vh;
+          `}
+        >
+          <p>{row._saveError}</p>
+        </div>
+      }
+      buttonProps={{ className: 'slds-button slds-button_icon slds-button_icon-error' }}
+    >
+      <Icon type="utility" icon="error" className="slds-button__icon" omitContainer />
+    </Popover>
   );
 };

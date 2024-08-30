@@ -1,10 +1,12 @@
-import { css, jsx, SerializedStyles } from '@emotion/react';
+import { css, SerializedStyles } from '@emotion/react';
 import { Component } from 'react';
 
 export interface AutoFullHeightContainerProps {
   className?: string;
   baseCss?: SerializedStyles;
+  /** Number of pixels from the bottom of the page to compensate for  */
   bottomBuffer?: number;
+  /** What should the top be set to if not yet rendered */
   bufferIfNotRendered?: number;
   /** If true, then container will always be the full height no matter how much content the data has */
   fillHeight?: boolean;
@@ -12,6 +14,7 @@ export interface AutoFullHeightContainerProps {
   setHeightAttr?: boolean;
   /** Set to true if used in a modal where the dom is not updated on the initial render */
   delayForSecondTopCalc?: boolean;
+  maxHeight?: string;
   children?: React.ReactNode;
 }
 
@@ -50,11 +53,14 @@ export class AutoFullHeightContainer extends Component<AutoFullHeightContainerPr
   };
 
   render() {
-    const { bottomBuffer, bufferIfNotRendered, className, baseCss, fillHeight = true, setHeightAttr, children } = this.props;
+    const { bottomBuffer, bufferIfNotRendered, className, baseCss, fillHeight = true, setHeightAttr, maxHeight, children } = this.props;
     const topPosition = this.state.topPosition || bufferIfNotRendered || 0;
-    const maxHeightStr = `calc(100vh - ${topPosition + (bottomBuffer || 0)}px);`;
+    let maxHeightStr = `calc(100vh - ${topPosition + (bottomBuffer || 0)}px)`;
+    if (maxHeight) {
+      maxHeightStr = `min(${maxHeightStr}, ${maxHeight})`;
+    }
     // make the min height string slightly smaller in attempt to limit possible scrollbar creep
-    const minHeightStr = `calc(100vh - ${topPosition + (bottomBuffer || 0) + 10}px);`;
+    const minHeightStr = `calc(100vh - ${topPosition + (bottomBuffer || 0) + 10}px)`;
     return (
       <div
         className={className}
@@ -62,9 +68,9 @@ export class AutoFullHeightContainer extends Component<AutoFullHeightContainerPr
         css={css`
           position: relative;
           ${baseCss || ''}
-          max-height: ${maxHeightStr}
-          ${fillHeight && `min-height: ${minHeightStr}`}
-          ${setHeightAttr && `height: ${maxHeightStr}`}
+          max-height: ${maxHeightStr};
+          ${fillHeight && `min-height: ${minHeightStr};`}
+          ${setHeightAttr && `height: ${maxHeightStr};`}
           overflow-y: auto;
         `}
       >

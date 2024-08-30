@@ -1,6 +1,6 @@
 import { GoogleApiClientConfig, useDrivePicker } from '@jetstream/shared/ui-utils';
 import classNames from 'classnames';
-import { uniqueId } from 'lodash';
+import uniqueId from 'lodash/uniqueId';
 import { FunctionComponent, useCallback, useEffect, useState } from 'react';
 import HelpText from '../../widgets/HelpText';
 import Icon from '../../widgets/Icon';
@@ -16,10 +16,11 @@ export interface GoogleFolderSelectorProps {
   label?: string;
   buttonLabel?: string;
   helpText?: string;
-  labelHelp?: string;
+  labelHelp?: string | null;
   hideLabel?: boolean;
   isRequired?: boolean;
   disabled?: boolean;
+  onSelectorVisible?: (isVisible: boolean) => void;
   onSelected?: (data: google.picker.DocumentObject) => void;
   onError?: (error: string) => void;
 }
@@ -36,14 +37,15 @@ export const GoogleFolderSelector: FunctionComponent<GoogleFolderSelectorProps> 
   helpText,
   isRequired,
   disabled,
+  onSelectorVisible,
   onSelected,
   onError,
 }) => {
   const [labelId] = useState(() => `${id}-label`);
-  const { data, error: scriptLoadError, loading: googleApiLoading, openPicker } = useDrivePicker(apiConfig);
+  const { data, error: scriptLoadError, loading: googleApiLoading, isVisible, openPicker } = useDrivePicker(apiConfig);
   const [loading, setLoading] = useState(false);
   const [selectedFolder, setSelectedFolder] = useState<google.picker.DocumentObject>();
-  const [errorMessage, setErrorMessage] = useState<string>();
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [{ managedFilename: managedName, filenameTruncated }, setManagedName] = useFilename(folderName);
 
   useEffect(() => {
@@ -53,10 +55,14 @@ export const GoogleFolderSelector: FunctionComponent<GoogleFolderSelectorProps> 
   }, [errorMessage, onError]);
 
   useEffect(() => {
+    onSelectorVisible && onSelectorVisible(isVisible);
+  }, [onSelectorVisible, isVisible]);
+
+  useEffect(() => {
     if (scriptLoadError) {
       setErrorMessage(SCRIPT_LOAD_ERR_MESSAGE);
     } else if (errorMessage === SCRIPT_LOAD_ERR_MESSAGE) {
-      setErrorMessage(undefined);
+      setErrorMessage(null);
     }
   }, [scriptLoadError, errorMessage]);
 
@@ -64,7 +70,7 @@ export const GoogleFolderSelector: FunctionComponent<GoogleFolderSelectorProps> 
     if (Array.isArray(data.docs) && data.docs.length > 0) {
       const selectedItem = data.docs[0];
       setSelectedFolder(selectedItem);
-      onSelected(selectedItem);
+      onSelected && onSelected(selectedItem);
       setManagedName(selectedItem.name);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

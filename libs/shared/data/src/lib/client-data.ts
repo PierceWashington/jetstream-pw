@@ -1,42 +1,43 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import * as API from '@jetstream/api-interfaces';
 import { HTTP, MIME_TYPES } from '@jetstream/shared/constants';
 import {
   AnonymousApexResponse,
   ApexCompletionResponse,
   ApiResponse,
+  AsyncResult,
   BulkApiCreateJobRequestPayload,
   BulkApiDownloadType,
   BulkJob,
   BulkJobBatchInfo,
   BulkJobWithBatches,
+  ChildRelationship,
   CloudinarySignature,
   CloudinaryUploadResponse,
+  DeployOptions,
   DeployResult,
+  DescribeGlobalResult,
+  DescribeMetadataResult,
+  DescribeSObjectResult,
   GenericRequestPayload,
   GoogleFileApiResponse,
+  InputReadFileContent,
+  ListMetadataQuery,
   ListMetadataResult,
   ListMetadataResultRaw,
   ManualRequestPayload,
   ManualRequestResponse,
-  MapOf,
+  OperationReturnType,
+  QueryResults,
   RetrieveResult,
   SalesforceApiRequest,
   SalesforceOrgUi,
   SobjectOperation,
-  UserProfileAuth0Ui,
   UserProfileUi,
+  UserProfileUiWithIdentities,
 } from '@jetstream/types';
-import parseISO from 'date-fns/parseISO';
-import {
-  AsyncResult,
-  DeployOptions,
-  DescribeGlobalResult,
-  DescribeMetadataResult,
-  DescribeSObjectResult,
-  ListMetadataQuery,
-} from 'jsforce';
+import { parseISO } from 'date-fns/parseISO';
 import isFunction from 'lodash/isFunction';
+import isNil from 'lodash/isNil';
 import { handleExternalRequest, handleRequest, transformListMetadataResponse } from './client-data-data-helper';
 //// LANDING PAGE ROUTES
 
@@ -47,9 +48,9 @@ function unwrapResponseIgnoreCache<T>(response: ApiResponse<T>) {
 }
 
 // duplicated here to avoid circular dependency :shrug:
-function convertDateToLocale(dateOrIsoDateString: string | Date, options?: Intl.DateTimeFormatOptions): string {
-  if (!dateOrIsoDateString) {
-    return dateOrIsoDateString as undefined;
+function convertDateToLocale(dateOrIsoDateString?: string | Date, options?: Intl.DateTimeFormatOptions): string | undefined {
+  if (isNil(dateOrIsoDateString)) {
+    return dateOrIsoDateString;
   }
   const date = dateOrIsoDateString instanceof Date ? dateOrIsoDateString : parseISO(dateOrIsoDateString);
   if (!options) {
@@ -60,12 +61,16 @@ function convertDateToLocale(dateOrIsoDateString: string | Date, options?: Intl.
 }
 
 //// APPLICATION ROUTES
-export async function platformEventProxyTest(org: SalesforceOrgUi): Promise<{ version: string }> {
-  return handleRequest({ method: 'GET', url: '/platform-event' }, { org }).then(unwrapResponseIgnoreCache);
-}
 
 export async function checkHeartbeat(): Promise<{ version: string }> {
   return handleRequest({ method: 'GET', url: '/api/heartbeat' }).then(unwrapResponseIgnoreCache);
+}
+
+export async function emailSupport(emailBody: string, attachments: InputReadFileContent[]): Promise<void> {
+  const form = new FormData();
+  form.append('emailBody', emailBody);
+  attachments.forEach((attachment) => form.append('files', new Blob([attachment.content]), attachment.filename));
+  return handleRequest({ method: 'POST', url: '/api/support/email', data: form }).then(unwrapResponseIgnoreCache);
 }
 
 export async function getUserProfile(): Promise<UserProfileUi> {
@@ -76,19 +81,19 @@ export async function deleteUserProfile(reason?: string): Promise<void> {
   return handleRequest({ method: 'DELETE', url: '/api/me', data: { reason } }).then(unwrapResponseIgnoreCache);
 }
 
-export async function getFullUserProfile(): Promise<UserProfileAuth0Ui> {
+export async function getFullUserProfile(): Promise<UserProfileUiWithIdentities> {
   return handleRequest({ method: 'GET', url: '/api/me/profile' }).then(unwrapResponseIgnoreCache);
 }
 
-export async function updateUserProfile(userProfile: { name: string }): Promise<UserProfileAuth0Ui> {
+export async function updateUserProfile(userProfile: { name: string }): Promise<UserProfileUiWithIdentities> {
   return handleRequest({ method: 'POST', url: '/api/me/profile', data: userProfile }).then(unwrapResponseIgnoreCache);
 }
 
-export async function unlinkIdentityFromProfile(identity: { provider: string; userId: string }): Promise<UserProfileAuth0Ui> {
+export async function unlinkIdentityFromProfile(identity: { provider: string; userId: string }): Promise<UserProfileUiWithIdentities> {
   return handleRequest({ method: 'DELETE', url: '/api/me/profile/identity', params: identity }).then(unwrapResponseIgnoreCache);
 }
 
-export async function resendVerificationEmail(identity: { provider: string; userId: string }): Promise<UserProfileAuth0Ui> {
+export async function resendVerificationEmail(identity: { provider: string; userId: string }): Promise<void> {
   return handleRequest({ method: 'POST', url: '/api/me/profile/identity/verify-email', params: identity }).then(unwrapResponseIgnoreCache);
 }
 
@@ -102,6 +107,10 @@ export async function updateOrg(org: SalesforceOrgUi, partialOrg: Partial<Salesf
 
 export async function deleteOrg(org: SalesforceOrgUi): Promise<void> {
   return handleRequest({ method: 'DELETE', url: `/api/orgs/${org.uniqueId}` }).then(unwrapResponseIgnoreCache);
+}
+
+export async function checkOrgHealth(org: SalesforceOrgUi): Promise<void> {
+  return handleRequest({ method: 'POST', url: `/api/orgs/health-check` }, { org }).then(unwrapResponseIgnoreCache);
 }
 
 /**
@@ -184,7 +193,31 @@ export async function describeSObject(
   return handleRequest(
     { method: 'GET', url: `/api/describe/${SObject}`, params: { isTooling } },
     { org, useCache: true, useQueryParamsInCacheKey: true, mockHeaderKey: SObject.startsWith('@') ? SObject : undefined }
-  );
+  ).then((results: ApiResponse<DescribeSObjectResult>) => {
+    // There are some rare circumstances where objects have duplicate child relationships which breaks things
+    // This is a Salesforce bug, but the best we can do is ignore duplicates
+    // Most notable example is Salesforce CPQ's SBQQ__Quote__c object which has two child relationships named `FinanceBalanceSnapshots`
+    results.data.childRelationships = results.data.childRelationships.reduce(
+      (
+        acc: {
+          childRelationships: ChildRelationship[];
+          previouslySeenRelationships: Set<string>;
+        },
+        item
+      ) => {
+        if (!item.relationshipName || !acc.previouslySeenRelationships.has(item.relationshipName)) {
+          acc.childRelationships.push(item);
+        }
+        item.relationshipName && acc.previouslySeenRelationships.add(item.relationshipName);
+        return acc;
+      },
+      {
+        childRelationships: [],
+        previouslySeenRelationships: new Set<string>(),
+      }
+    ).childRelationships;
+    return results;
+  });
 }
 
 export async function query<T = any>(
@@ -192,7 +225,7 @@ export async function query<T = any>(
   query: string,
   isTooling = false,
   includeDeletedRecords = false
-): Promise<API.QueryResults<T>> {
+): Promise<QueryResults<T>> {
   return handleRequest(
     { method: 'POST', url: `/api/query`, params: { isTooling, includeDeletedRecords }, data: { query } },
     { org, useQueryParamsInCacheKey: true, useBodyInCacheKey: true }
@@ -203,18 +236,30 @@ export async function queryWithCache<T = any>(
   org: SalesforceOrgUi,
   query: string,
   isTooling = false,
-  skipRequestCache = false
-): Promise<ApiResponse<API.QueryResults<T>>> {
+  skipRequestCache = false,
+  includeDeletedRecords = false
+): Promise<ApiResponse<QueryResults<T>>> {
   return handleRequest(
-    { method: 'POST', url: `/api/query`, params: { isTooling }, data: { query } },
+    { method: 'POST', url: `/api/query`, params: { isTooling, includeDeletedRecords }, data: { query } },
     { org, useCache: true, skipRequestCache, useQueryParamsInCacheKey: true, useBodyInCacheKey: true }
   );
 }
 
-export async function queryMore<T = any>(org: SalesforceOrgUi, nextRecordsUrl: string, isTooling = false): Promise<API.QueryResults<T>> {
+export async function queryMore<T = any>(org: SalesforceOrgUi, nextRecordsUrl: string, isTooling = false): Promise<QueryResults<T>> {
   return handleRequest({ method: 'GET', url: `/api/query-more`, params: { nextRecordsUrl, isTooling } }, { org }).then(
     unwrapResponseIgnoreCache
   );
+}
+
+export async function queryMoreWithCache<T = any>(
+  org: SalesforceOrgUi,
+  nextRecordsUrl: string,
+  isTooling = false
+): Promise<QueryResults<T>> {
+  return handleRequest(
+    { method: 'GET', url: `/api/query-more`, params: { nextRecordsUrl, isTooling } },
+    { org, useCache: true, useQueryParamsInCacheKey: true }
+  ).then(unwrapResponseIgnoreCache);
 }
 
 /**
@@ -231,7 +276,7 @@ export async function queryAllFromList<T = any>(
   soqlQueries: string[],
   isTooling = false,
   includeDeletedRecords = false
-): Promise<API.QueryResults<T>> {
+): Promise<QueryResults<T>> {
   let results;
   for (const soqlQuery of soqlQueries) {
     const _results = await queryAll(org, soqlQuery, isTooling, includeDeletedRecords);
@@ -259,10 +304,10 @@ export async function queryAll<T = any>(
   includeDeletedRecords = false,
   // Ended up not using onProgress - if used, need to test
   onProgress?: (fetched: number, total: number) => void
-): Promise<API.QueryResults<T>> {
+): Promise<QueryResults<T>> {
   const results = await query(org, soqlQuery, isTooling, includeDeletedRecords);
-  if (!results.queryResults.done) {
-    let progress: { initialFetched: number; onProgress?: (fetched: number, total: number) => void };
+  if (!results.queryResults.done && results.queryResults.nextRecordsUrl) {
+    let progress: { initialFetched: number; onProgress?: (fetched: number, total: number) => void } | undefined = undefined;
     if (isFunction(onProgress)) {
       onProgress(results.queryResults.records.length, results.queryResults.totalSize);
       progress = {
@@ -272,7 +317,7 @@ export async function queryAll<T = any>(
     }
     const currentResults = await queryRemaining(org, results.queryResults.nextRecordsUrl, isTooling, progress);
     results.queryResults.records = results.queryResults.records.concat(currentResults.queryResults.records);
-    results.queryResults.nextRecordsUrl = null;
+    results.queryResults.nextRecordsUrl = undefined;
     results.queryResults.done = true;
   }
   return results;
@@ -294,13 +339,69 @@ export async function queryRemaining<T = any>(
     initialFetched: number;
     onProgress?: (fetched: number, total: number) => void;
   }
-): Promise<API.QueryResults<T>> {
+): Promise<QueryResults<T>> {
   const results = await queryMore(org, nextRecordsUrl, isTooling);
-  while (!results.queryResults.done) {
+  while (!results.queryResults.done && results.queryResults.nextRecordsUrl) {
     if (progress && isFunction(progress.onProgress)) {
       progress.onProgress(results.queryResults.records.length + progress.initialFetched, results.queryResults.totalSize);
     }
     const currentResults = await queryMore(org, results.queryResults.nextRecordsUrl, isTooling);
+    // update initial object with current results
+    results.queryResults.records = results.queryResults.records.concat(currentResults.queryResults.records);
+    results.queryResults.nextRecordsUrl = currentResults.queryResults.nextRecordsUrl;
+    results.queryResults.done = currentResults.queryResults.done;
+  }
+  results.queryResults.done = true;
+  return results;
+}
+
+/**
+ * Same as queryAll, but caches results
+ */
+export async function queryAllWithCache<T = any>(
+  org: SalesforceOrgUi,
+  soqlQuery: string,
+  isTooling = false,
+  includeDeletedRecords = false,
+  // Ended up not using onProgress - if used, need to test
+  onProgress?: (fetched: number, total: number) => void
+): Promise<ApiResponse<QueryResults<T>>> {
+  const { data: results, cache } = await queryWithCache(org, soqlQuery, isTooling, false, includeDeletedRecords);
+  if (!results.queryResults.done && results.queryResults.nextRecordsUrl) {
+    let progress: { initialFetched: number; onProgress?: (fetched: number, total: number) => void } | undefined = undefined;
+    if (isFunction(onProgress)) {
+      onProgress(results.queryResults.records.length, results.queryResults.totalSize);
+      progress = {
+        initialFetched: results.queryResults.records.length,
+        onProgress,
+      };
+    }
+    const currentResults = await queryRemainingWithCache(org, results.queryResults.nextRecordsUrl, isTooling, progress);
+    results.queryResults.records = results.queryResults.records.concat(currentResults.queryResults.records);
+    results.queryResults.nextRecordsUrl = undefined;
+    results.queryResults.done = true;
+  }
+  return { data: results, cache };
+}
+
+/**
+ * Same as queryRemaining, but caches results
+ */
+export async function queryRemainingWithCache<T = any>(
+  org: SalesforceOrgUi,
+  nextRecordsUrl: string,
+  isTooling = false,
+  progress?: {
+    initialFetched: number;
+    onProgress?: (fetched: number, total: number) => void;
+  }
+): Promise<QueryResults<T>> {
+  const results = await queryMoreWithCache(org, nextRecordsUrl, isTooling);
+  while (!results.queryResults.done && results.queryResults.nextRecordsUrl) {
+    if (progress && isFunction(progress.onProgress)) {
+      progress.onProgress(results.queryResults.records.length + progress.initialFetched, results.queryResults.totalSize);
+    }
+    const currentResults = await queryMoreWithCache(org, results.queryResults.nextRecordsUrl, isTooling);
     // update initial object with current results
     results.queryResults.records = results.queryResults.records.concat(currentResults.queryResults.records);
     results.queryResults.nextRecordsUrl = currentResults.queryResults.nextRecordsUrl;
@@ -320,7 +421,7 @@ export async function queryAllUsingOffset<T = any>(
   selectedOrg: SalesforceOrgUi,
   soqlQuery: string,
   isTooling = false
-): Promise<API.QueryResults<T>> {
+): Promise<QueryResults<T>> {
   const LIMIT = 2000;
   let offset = 0;
   let done = false;
@@ -343,19 +444,20 @@ export async function queryAllUsingOffset<T = any>(
   return results;
 }
 
-export async function sobjectOperation<T = any>(
+export async function sobjectOperation<O extends SobjectOperation>(
   org: SalesforceOrgUi,
   sobject: string,
   operation: SobjectOperation,
   body: {
-    ids?: string | string[]; // required for retrieve | create | delete
-    records?: any | any[]; // required for create | update | upsert
+    ids?: string[]; // required for retrieve | create | delete
+    records?: any[]; // required for create | update | upsert
   },
   query: {
     externalId?: string;
     allOrNone?: boolean;
   } = {}
-): Promise<T> {
+): Promise<OperationReturnType<O, any>> {
+  // FIXME: add type for R as the first generic type in function
   return handleRequest({ method: 'POST', url: `/api/record/${operation}/${sobject}`, params: { ...query }, data: body }, { org }).then(
     unwrapResponseIgnoreCache
   );
@@ -413,7 +515,7 @@ export async function checkMetadataResults(org: SalesforceOrgUi, id: string, inc
 
 export async function retrieveMetadataFromListMetadata(
   org: SalesforceOrgUi,
-  payload: MapOf<ListMetadataResult[]>
+  payload: Record<string, ListMetadataResult[]>
 ): Promise<RetrieveResult> {
   return handleRequest({ method: 'POST', url: `/api/metadata/retrieve/list-metadata`, data: payload }, { org }).then(
     unwrapResponseIgnoreCache
@@ -446,7 +548,7 @@ export async function checkMetadataRetrieveResultsAndDeployToTarget(
     deployOptions,
     replacementPackageXml,
     changesetName,
-  }: { id: string; deployOptions: DeployOptions; replacementPackageXml?: string; changesetName?: string }
+  }: { id: string; deployOptions?: DeployOptions; replacementPackageXml?: string; changesetName?: string }
 ): Promise<{ type: 'deploy' | 'retrieve'; results: RetrieveResult; zipFile?: string }> {
   return handleRequest(
     {
@@ -461,8 +563,8 @@ export async function checkMetadataRetrieveResultsAndDeployToTarget(
 
 export async function getPackageXml(
   org: SalesforceOrgUi,
-  metadata: MapOf<ListMetadataResult[]>,
-  otherFields: MapOf<string> = {}
+  metadata: Record<string, ListMetadataResult[]>,
+  otherFields: Record<string, string> = {}
 ): Promise<string> {
   return handleRequest({ method: 'POST', url: `/api/metadata/package-xml`, data: { metadata, otherFields } }, { org }).then(
     unwrapResponseIgnoreCache
@@ -481,6 +583,10 @@ export async function bulkApiCreateJob(org: SalesforceOrgUi, payload: BulkApiCre
   return handleRequest({ method: 'POST', url: `/api/bulk`, data: payload }, { org }).then(unwrapResponseIgnoreCache);
 }
 
+export async function bulkApiCancelJob(org: SalesforceOrgUi, payload: BulkApiCreateJobRequestPayload): Promise<BulkJobWithBatches> {
+  return handleRequest({ method: 'POST', url: `/api/bulk`, data: payload }, { org }).then(unwrapResponseIgnoreCache);
+}
+
 export async function bulkApiGetJob(org: SalesforceOrgUi, jobId: string): Promise<BulkJobWithBatches> {
   return handleRequest<BulkJobWithBatches>({ method: 'GET', url: `/api/bulk/${jobId}` }, { org })
     .then(unwrapResponseIgnoreCache)
@@ -494,7 +600,11 @@ export async function bulkApiGetJob(org: SalesforceOrgUi, jobId: string): Promis
 }
 
 export async function bulkApiCloseJob(org: SalesforceOrgUi, jobId: string): Promise<BulkJob> {
-  return handleRequest({ method: 'DELETE', url: `/api/bulk/${jobId}` }, { org }).then(unwrapResponseIgnoreCache);
+  return handleRequest({ method: 'DELETE', url: `/api/bulk/${jobId}/close` }, { org }).then(unwrapResponseIgnoreCache);
+}
+
+export async function bulkApiAbortJob(org: SalesforceOrgUi, jobId: string): Promise<BulkJob> {
+  return handleRequest({ method: 'DELETE', url: `/api/bulk/${jobId}/abort` }, { org }).then(unwrapResponseIgnoreCache);
 }
 
 export async function bulkApiAddBatchToJob(
@@ -504,7 +614,13 @@ export async function bulkApiAddBatchToJob(
   closeJob?: boolean
 ): Promise<BulkJobBatchInfo> {
   return handleRequest<BulkJobBatchInfo>(
-    { method: 'POST', url: `/api/bulk/${jobId}`, data: csv, headers: { [HTTP.HEADERS.CONTENT_TYPE]: HTTP.CONTENT_TYPE.CSV } },
+    {
+      method: 'POST',
+      url: `/api/bulk/${jobId}`,
+      data: csv,
+      params: { closeJob },
+      headers: { [HTTP.HEADERS.CONTENT_TYPE]: HTTP.CONTENT_TYPE.CSV },
+    },
     { org }
   )
     .then(unwrapResponseIgnoreCache)
@@ -530,9 +646,12 @@ export async function bulkApiGetRecords<T = any>(
   org: SalesforceOrgUi,
   jobId: string,
   batchId: string,
-  type: BulkApiDownloadType
+  type: BulkApiDownloadType,
+  isQuery?: boolean
 ): Promise<T[]> {
-  return handleRequest({ method: 'GET', url: `/api/bulk/${jobId}/${batchId}`, params: { type } }, { org }).then(unwrapResponseIgnoreCache);
+  return handleRequest({ method: 'GET', url: `/api/bulk/${jobId}/${batchId}`, params: { type, isQuery } }, { org }).then(
+    unwrapResponseIgnoreCache
+  );
 }
 
 export async function anonymousApex(org: SalesforceOrgUi, apex: string, logLevel: string): Promise<AnonymousApexResponse> {
@@ -549,7 +668,7 @@ export async function salesforceApiReq(): Promise<SalesforceApiRequest[]> {
 
 export async function googleUploadFile(
   accessToken: string,
-  { fileMimeType, filename, folderId, fileData }: { fileMimeType: string; filename: string; folderId: string; fileData: any },
+  { fileMimeType, filename, folderId, fileData }: { fileMimeType: string; filename: string; folderId?: string | null; fileData: any },
   targetMimeType = MIME_TYPES.GSHEET
 ): Promise<GoogleFileApiResponse & { webViewLink: string }> {
   return await handleExternalRequest({
@@ -563,29 +682,21 @@ export async function googleUploadFile(
     params: {
       uploadType: 'resumable',
       supportsAllDrives: true,
+      fields: 'webViewLink',
     },
     data: {
       name: filename,
       mimeType: targetMimeType.replace(';charset=utf-8', ''),
-      parents: [folderId].filter(Boolean),
+      parents: folderId ? [folderId] : undefined,
     },
   })
     .then((response) => ({ url: response.headers.location, fileId: response.headers['x-guploader-uploadid'] }))
     .then(({ url }) =>
-      handleExternalRequest<GoogleFileApiResponse>({
+      handleExternalRequest<GoogleFileApiResponse & { webViewLink: string }>({
         method: 'PUT',
         url,
         headers: { Authorization: `Bearer ${accessToken}` },
         data: fileData,
-      })
-    )
-    .then((response) =>
-      // Re-fetch metadata to include `webViewLink` property
-      handleExternalRequest<GoogleFileApiResponse & { webViewLink: string }>({
-        method: 'GET',
-        url: `https://www.googleapis.com/drive/v3/files/${response.data.id}`,
-        headers: { Authorization: `Bearer ${accessToken}` },
-        params: { fields: 'id, kind, mimeType, name, webViewLink', supportsAllDrives: true },
       })
     )
     .then((response) => response.data);

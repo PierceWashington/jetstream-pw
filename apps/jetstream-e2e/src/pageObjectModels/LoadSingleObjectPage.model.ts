@@ -1,22 +1,24 @@
 import { APIRequestContext, expect, Locator, Page } from '@playwright/test';
 import { ApiRequestUtils } from '../fixtures/ApiRequestUtils';
+import { PlaywrightPage } from './PlaywrightPage.model';
 
 export class LoadSingleObjectPage {
   readonly apiRequestUtils: ApiRequestUtils;
+  readonly playwrightPage: PlaywrightPage;
   readonly page: Page;
   readonly request: APIRequestContext;
   readonly sobjectList: Locator;
 
-  constructor(page: Page, request: APIRequestContext, apiRequestUtils: ApiRequestUtils) {
+  constructor(page: Page, request: APIRequestContext, apiRequestUtils: ApiRequestUtils, playwrightPage: PlaywrightPage) {
     this.apiRequestUtils = apiRequestUtils;
+    this.playwrightPage = playwrightPage;
     this.page = page;
     this.request = request;
     this.sobjectList = page.getByTestId('sobject-list');
   }
 
   async goto() {
-    await this.page.getByRole('button', { name: 'Load Records' }).click();
-    await this.page.getByRole('menuitemcheckbox', { name: 'Load Records to Single Object' }).click();
+    await this.page.getByRole('link', { name: 'Load Records' }).first().click();
     await this.page.waitForURL('**/load');
   }
 
@@ -64,14 +66,14 @@ export class LoadSingleObjectPage {
     await this.selectFile(filename);
 
     await expect(this.page.getByText('Select an object from the list on the left to continue')).toBeVisible();
-    await this.validateHeaderButtonState(false, false, false);
+    await this.validateHeaderButtonState(true, false, false);
 
     await this.selectObject(objectType);
 
     await this.page.locator('label').filter({ hasText: 'Update' });
     await this.page.getByTestId('load-type').getByText(loadType);
 
-    await this.validateHeaderButtonState(false, false, true);
+    await this.validateHeaderButtonState(true, false, true);
 
     await this.page.getByTestId('next-step-button').click();
   }
@@ -98,6 +100,7 @@ export class LoadSingleObjectPage {
     // choose non-ext id
     // polymorphic fields
     // getByRole('button', { name: 'Continue to Load Records' })
+    // Manually added fields
   }
 
   async loadRecords(apiType: 'Bulk API' | 'Batch API', isSubsequentLoad = false) {

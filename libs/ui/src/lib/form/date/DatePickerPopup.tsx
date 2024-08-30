@@ -2,14 +2,14 @@
 
 import { PositionLeftRight, PreviousNext } from '@jetstream/types';
 import { isAfter, isBefore, setYear } from 'date-fns';
-import addMonths from 'date-fns/addMonths';
-import formatDate from 'date-fns/format';
-import startOfDay from 'date-fns/startOfDay';
-import startOfMonth from 'date-fns/startOfMonth';
-import cloneDate from 'date-fns/toDate';
-import Grid from 'libs/ui/src/lib/grid/Grid';
-import GridCol from 'libs/ui/src/lib/grid/GridCol';
+import { addMonths } from 'date-fns/addMonths';
+import { formatDate } from 'date-fns/format';
+import { startOfDay } from 'date-fns/startOfDay';
+import { startOfMonth } from 'date-fns/startOfMonth';
+import { toDate as cloneDate } from 'date-fns/toDate';
 import { FunctionComponent, useEffect, useState } from 'react';
+import Grid from '../../grid/Grid';
+import GridCol from '../../grid/GridCol';
 import DateGrid from './DateGrid';
 import DateGridPrevNextSelector from './DateGridPrevNextSelector';
 
@@ -18,8 +18,8 @@ export interface DatePickerPopupProps {
   initialVisibleDate?: Date;
   dropDownPosition?: PositionLeftRight;
   availableYears: number[];
-  minAvailableDate: Date;
-  maxAvailableDate: Date;
+  minAvailableDate?: Date;
+  maxAvailableDate?: Date;
   onClose: () => void;
   onSelection: (date: Date) => void;
   onClear: () => void;
@@ -41,7 +41,7 @@ export const DatePickerPopup: FunctionComponent<DatePickerPopupProps> = ({
   const [currMonthString, setCurrMonthString] = useState(() => formatDate(initialVisibleDate, 'MMMM'));
   const [currMonth, setCurrMonth] = useState(() => initialVisibleDate.getMonth());
   const [currYear, setCurrYear] = useState(() => initialVisibleDate.getFullYear());
-  const [cameFromMonth, setCameFromMonth] = useState<PreviousNext>(null);
+  const [cameFromMonth, setCameFromMonth] = useState<PreviousNext | null>(null);
   const [prevMonthAvailable, setPrevMonthAvailable] = useState(true);
   const [nextMonthAvailable, setNextMonthAvailable] = useState(true);
 
@@ -85,12 +85,13 @@ export const DatePickerPopup: FunctionComponent<DatePickerPopupProps> = ({
   }
 
   return (
-    <div
-      aria-hidden="false"
-      aria-label={`Date picker: ${visibleMonth}`}
-      className={`slds-datepicker slds-dropdown slds-dropdown_${dropDownPosition}`}
-      role="dialog"
-    >
+    // <div
+    //   aria-hidden="false"
+    //   aria-label={`Date picker: ${visibleMonth}`}
+    //   className={`slds-datepicker slds-dropdown slds-dropdown_${dropDownPosition}`}
+    //   role="dialog"
+    // >
+    <>
       <DateGridPrevNextSelector
         id="date-picker"
         currMonth={currMonthString}
@@ -130,7 +131,8 @@ export const DatePickerPopup: FunctionComponent<DatePickerPopupProps> = ({
           </button>
         </GridCol>
       </Grid>
-    </div>
+      {/* </div> */}
+    </>
   );
 };
 

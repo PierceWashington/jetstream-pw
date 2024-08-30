@@ -1,7 +1,6 @@
 import { css } from '@emotion/react';
-import { transformTabularDataToExcelStr, useNonInitialEffect } from '@jetstream/shared/ui-utils';
+import { copyRecordsToClipboard, useNonInitialEffect } from '@jetstream/shared/ui-utils';
 import { ListItem, SalesforceOrgUi } from '@jetstream/types';
-import copyToClipboard from 'copy-to-clipboard';
 import { Fragment, FunctionComponent, useState } from 'react';
 import FileDownloadModal from '../file-download-modal/FileDownloadModal';
 import EmptyState from '../illustrations/EmptyState';
@@ -39,9 +38,9 @@ export const QueryWhereIsThisUsed: FunctionComponent<QueryWhereIsThisUsedProps> 
     if (items) {
       setExportData(
         items.map(({ meta }) => ({
-          'Reference Type': meta.MetadataComponentType,
-          'Reference Label': meta.MetadataComponentName,
-          Namespace: meta.MetadataComponentNamespace,
+          'Reference Type': meta?.MetadataComponentType || '',
+          'Reference Label': meta?.MetadataComponentName || '',
+          Namespace: meta?.MetadataComponentNamespace || '',
         }))
       );
     }
@@ -61,9 +60,7 @@ export const QueryWhereIsThisUsed: FunctionComponent<QueryWhereIsThisUsedProps> 
   }
 
   function handleCopyToClipboard() {
-    copyToClipboard(transformTabularDataToExcelStr(exportData, ['Reference Type', 'Reference Label', 'Namespace']), {
-      format: 'text/plain',
-    });
+    copyRecordsToClipboard(exportData, 'excel', ['Reference Type', 'Reference Label', 'Namespace']);
   }
 
   return (
@@ -92,14 +89,14 @@ export const QueryWhereIsThisUsed: FunctionComponent<QueryWhereIsThisUsedProps> 
                   <button
                     className="slds-button slds-button_neutral"
                     onClick={handleCopyToClipboard}
-                    disabled={!hasLoaded || loading || !items.length}
+                    disabled={!hasLoaded || loading || !items?.length}
                   >
                     Copy to Clipboard
                   </button>
                   <button
                     className="slds-button slds-button_neutral"
                     onClick={handleDownload}
-                    disabled={!hasLoaded || loading || !items.length}
+                    disabled={!hasLoaded || loading || !items?.length}
                   >
                     Download
                   </button>
@@ -127,9 +124,9 @@ export const QueryWhereIsThisUsed: FunctionComponent<QueryWhereIsThisUsedProps> 
                     </p>
                   </Fragment>
                 )}
-                {hasLoaded && !loading && !items.length && !hasError && <EmptyState headline="No dependencies were found"></EmptyState>}
+                {hasLoaded && !loading && !items?.length && !hasError && <EmptyState headline="No dependencies were found"></EmptyState>}
                 <ReadonlyList
-                  items={items}
+                  items={items || []}
                   getContent={(item: ListItem<string, MetadataDependency>) => ({
                     key: item.id,
                     id: item.id,

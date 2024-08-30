@@ -1,10 +1,10 @@
 import { useNonInitialEffect } from '@jetstream/shared/ui-utils';
 import { ListItem } from '@jetstream/types';
-import addMinutes from 'date-fns/addMinutes';
-import formatDate from 'date-fns/format';
-import isSameDay from 'date-fns/isSameDay';
-import parseDate from 'date-fns/parse';
-import React, { FunctionComponent, useState } from 'react';
+import { addMinutes } from 'date-fns/addMinutes';
+import { formatDate } from 'date-fns/format';
+import { isSameDay } from 'date-fns/isSameDay';
+import { parse as parseDate } from 'date-fns/parse';
+import { FunctionComponent, useState } from 'react';
 import Picklist, { PicklistProps } from '../picklist/Picklist';
 
 type PicklistPropsWithoutItems = Omit<
@@ -18,7 +18,8 @@ const GENERATED_TIME = new Map<number, ListItem[]>();
 // attribution: https://github.com/salesforce/design-system-react/blob/master/components/time-picker/index.jsx
 function generateTimeListItems(stepInMinutes: number): ListItem[] {
   if (GENERATED_TIME.has(stepInMinutes)) {
-    return GENERATED_TIME.get(stepInMinutes);
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+    return GENERATED_TIME.get(stepInMinutes)!;
   }
   const output: ListItem[] = [];
   const baseDate = parseDate('00', 'HH', new Date());
@@ -78,7 +79,7 @@ function normalizeInitialTime(time: string, stepInMinutes: number) {
 export interface TimePickerProps extends PicklistPropsWithoutItems {
   stepInMinutes?: number;
   // Selected item is time formatted as "00:00:00.000"
-  selectedItem?: string; // This only applies on initialization, then the component will manage ongoing state
+  selectedItem?: string | null; // This only applies on initialization, then the component will manage ongoing state
   onChange: (selectedItem: string | null) => void;
 }
 

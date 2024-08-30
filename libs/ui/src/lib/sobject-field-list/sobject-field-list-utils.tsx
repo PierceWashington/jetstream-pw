@@ -2,7 +2,7 @@ import { REGEX } from '@jetstream/shared/utils';
 import { FieldWrapper } from '@jetstream/types';
 import { FilterTypes } from './SobjectFieldListFilterNew';
 
-export function getBgColor(level: number): string {
+export function getBgColor(level: number): string | undefined {
   switch (level) {
     case 1: {
       return '#eef1f6';
@@ -22,8 +22,12 @@ export function getBgColor(level: number): string {
   }
 }
 
-export function filterFieldsFn(FilterTypes: FilterTypes) {
+export function filterFieldsFn(FilterTypes: FilterTypes, selectedFields?: Set<string>) {
   return (field: FieldWrapper) => {
+    if (FilterTypes.selected === 'selected' && !selectedFields?.has(field.name)) {
+      return false;
+    }
+
     if (FilterTypes.editable === 'editable' && !field.metadata.updateable) {
       return false;
     } else if (FilterTypes.editable === 'creatable' && !field.metadata.updateable && !field.metadata.createable) {

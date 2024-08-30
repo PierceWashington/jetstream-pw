@@ -1,6 +1,6 @@
-import { css } from '@emotion/react';
+import { css, SerializedStyles } from '@emotion/react';
 import { Popover as HeadlessPopover } from '@headlessui/react';
-import { SmallMediumLarge } from '@jetstream/types';
+import { FullWidth, sizeXLarge, SmallMediumLarge } from '@jetstream/types';
 import classNames from 'classnames';
 import { CSSProperties, forwardRef, Fragment, MouseEvent, ReactNode, useCallback, useImperativeHandle, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -8,10 +8,12 @@ import { usePopper } from 'react-popper';
 import { Placement } from 'tippy.js';
 import { Icon } from '../widgets/Icon';
 
-const ConditionalPortal = ({ omitPortal, portalRef, children }: { omitPortal: boolean; portalRef: Element; children: ReactNode }) => (
-  // eslint-disable-next-line react/jsx-no-useless-fragment
-  <Fragment>{omitPortal ? children : createPortal(children, portalRef || document.body)}</Fragment>
-);
+const ConditionalPortal = ({ omitPortal, portalRef, children }: { omitPortal: boolean; portalRef: Element; children: ReactNode }) => {
+  if (omitPortal) {
+    return children;
+  }
+  return createPortal(children as any, portalRef || document.body) as ReactNode;
+};
 
 export interface PopoverRef {
   toggle: () => void;
@@ -29,14 +31,16 @@ export interface PopoverProps {
   containerClassName?: string;
   closeBtnClassName?: string;
   bodyClassName?: string;
+  bodyStyle?: SerializedStyles;
   placement?: Placement;
   content: JSX.Element;
   header?: JSX.Element;
   footer?: JSX.Element;
   panelStyle?: CSSProperties;
   buttonProps: React.HTMLProps<HTMLButtonElement> & { as?: string };
+  panelProps?: Omit<React.HTMLProps<HTMLDivElement>, 'children' | 'className' | 'as' | 'refName' | 'onKeyDown'>;
   buttonStyle?: CSSProperties;
-  size?: SmallMediumLarge;
+  size?: SmallMediumLarge | sizeXLarge | FullWidth;
   /** By default, the popover is displayed in a portal, but this can be skipped by setting this to true */
   omitPortal?: boolean;
   portalRef?: Element;
@@ -53,12 +57,14 @@ export const Popover = forwardRef<PopoverRef, PopoverProps>(
       containerClassName,
       closeBtnClassName,
       bodyClassName = 'slds-popover__body',
+      bodyStyle,
       placement = 'auto',
       content,
       header,
       footer,
       panelStyle,
       buttonProps,
+      panelProps,
       buttonStyle,
       children,
       size,
@@ -69,10 +75,10 @@ export const Popover = forwardRef<PopoverRef, PopoverProps>(
     ref
   ) => {
     const isOpen = useRef<boolean>(false);
-    const [referenceElement, setReferenceElement] = useState<HTMLElement>(null);
-    const [popperElement, setPopperElement] = useState<HTMLElement>(null);
-    const [arrowElement, setArrowElement] = useState<HTMLElement>(null);
-    const [closeElement, setCloseElement] = useState<HTMLElement>(null);
+    const [referenceElement, setReferenceElement] = useState<HTMLElement | null>(null);
+    const [popperElement, setPopperElement] = useState<HTMLElement | null>(null);
+    const [arrowElement, setArrowElement] = useState<HTMLElement | null>(null);
+    const [closeElement, setCloseElement] = useState<HTMLElement | null>(null);
 
     const { styles, attributes } = usePopper(referenceElement, popperElement, {
       placement: placement,
@@ -123,7 +129,7 @@ export const Popover = forwardRef<PopoverRef, PopoverProps>(
               {open && (
                 <ConditionalPortal omitPortal={omitPortal} portalRef={portalRef}>
                   <HeadlessPopover.Panel
-                    ref={setPopperElement}
+                    ref={setPopperElement as any}
                     data-testid={testId}
                     style={{ ...styles.popper, ...panelStyle }}
                     {...attributes.popper}
@@ -186,6 +192,7 @@ export const Popover = forwardRef<PopoverRef, PopoverProps>(
                         }
                       }
                     `}
+                    {...panelProps}
                   >
                     {/* CLOSE BUTTON */}
                     <HeadlessPopover.Button
@@ -204,7 +211,9 @@ export const Popover = forwardRef<PopoverRef, PopoverProps>(
                     </HeadlessPopover.Button>
                     {/* CONTENT */}
                     {header}
-                    <div className={bodyClassName}>{content}</div>
+                    <div css={bodyStyle} className={bodyClassName}>
+                      {content}
+                    </div>
                     {footer}
                     {/* ARROW */}
                     <div

@@ -1,13 +1,9 @@
-/* eslint-disable no-fallthrough */
-import { logger } from '@jetstream/shared/client-logger';
 import { queryMore } from '@jetstream/shared/data';
-import { formatNumber, transformTabularDataToExcelStr } from '@jetstream/shared/ui-utils';
-import { flattenRecord, flattenRecords } from '@jetstream/shared/utils';
-import { SalesforceOrgUi } from '@jetstream/types';
-import copyToClipboard from 'copy-to-clipboard';
-import { QueryResult } from 'jsforce';
-import { FunctionComponent, useCallback, useEffect, useRef, useState } from 'react';
-import { FormatterProps } from 'react-data-grid';
+import { copyRecordsToClipboard, formatNumber } from '@jetstream/shared/ui-utils';
+import { flattenRecord } from '@jetstream/shared/utils';
+import { Maybe, QueryResult, SalesforceOrgUi } from '@jetstream/types';
+import { FunctionComponent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { RenderCellProps } from 'react-data-grid';
 import RecordDownloadModal from '../file-download-modal/RecordDownloadModal';
 import Grid from '../grid/Grid';
 import AutoFullHeightContainer from '../layout/AutoFullHeightContainer';
@@ -15,15 +11,21 @@ import Modal from '../modal/Modal';
 import { ContextMenuItem } from '../popover/ContextMenu';
 import Icon from '../widgets/Icon';
 import Spinner from '../widgets/Spinner';
+import { DataTable } from './DataTable';
 import { DataTableSubqueryContext } from './data-table-context';
-import { ColumnWithFilter, RowWithKey, SalesforceQueryColumnDefinition, SubqueryContext } from './data-table-types';
-import { getRowId, getSubqueryModalTagline, NON_DATA_COLUMN_KEYS } from './data-table-utils';
-import { ContextMenuActionData, DataTable } from './DataTable';
+import { ColumnWithFilter, ContextAction, ContextMenuActionData, RowWithKey, SubqueryContext } from './data-table-types';
+import {
+  NON_DATA_COLUMN_KEYS,
+  TABLE_CONTEXT_MENU_ITEMS,
+  copySalesforceRecordTableDataToClipboard,
+  getRowId,
+  getSubqueryModalTagline,
+} from './data-table-utils';
 
-export const SubqueryRenderer: FunctionComponent<FormatterProps<RowWithKey, unknown>> = ({ column, row, onRowChange, isCellSelected }) => {
-  const isMounted = useRef(null);
+export const SubqueryRenderer: FunctionComponent<RenderCellProps<RowWithKey, unknown>> = ({ column, row, onRowChange }) => {
+  const isMounted = useRef(true);
   const [isActive, setIsActive] = useState(false);
-  const [modalTagline, setModalTagline] = useState<string>();
+  const [modalTagline, setModalTagline] = useState<Maybe<string>>(null);
   const [downloadModalIsActive, setDownloadModalIsActive] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [queryResults, setQueryResults] = useState<QueryResult<any>>(row[column.key] || {});
@@ -39,6 +41,7 @@ export const SubqueryRenderer: FunctionComponent<FormatterProps<RowWithKey, unkn
     };
   }, []);
 
+  // Not yet supported
   const handleRowAction = useCallback((row: any, action: 'view' | 'edit' | 'clone' | 'apex') => {
     // logger.info('row action', row, action);
     // switch (action) {
@@ -60,28 +63,11 @@ export const SubqueryRenderer: FunctionComponent<FormatterProps<RowWithKey, unkn
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // useEffect(() => {
-  //   if (!records) {
-  //     return;
-  //   }
-  //   const columnKeys = columns?.map((col) => col.key) || null;
-  //   setRows(
-  //     records.map((row) => {
-  //       return {
-  //         _key: getRowId(row),
-  //         _action: handleRowAction,
-  //         // ...row,
-  //         ...(columnKeys ? flattenRecord(row, columnKeys, false) : row),
-  //       };
-  //     })
-  //   );
-  // }, [handleRowAction, records]);
-
   function handleViewData() {
     if (isActive) {
       setIsActive(false);
     } else {
-      if (!modalTagline) {
+      if (!modalTagline && row) {
         setModalTagline(getSubqueryModalTagline(row));
       }
       setIsActive(true);
@@ -103,14 +89,15 @@ export const SubqueryRenderer: FunctionComponent<FormatterProps<RowWithKey, unkn
     setDownloadModalIsActive(true);
   }
 
-  function handleCopyToClipboard(columns: ColumnWithFilter<any, unknown>[]) {
-    const fields = columns.map((column) => column.key);
-    const flattenedData = flattenRecords(records, fields);
-    copyToClipboard(transformTabularDataToExcelStr(flattenedData, fields), { format: 'text/plain' });
+  function handleCopyToClipboard(fields: string[]) {
+    copyRecordsToClipboard(records, 'excel', fields);
   }
 
   async function loadMore(org: SalesforceOrgUi, isTooling: boolean) {
     try {
+      if (!nextRecordsUrl) {
+        return;
+      }
       setIsLoadingMore(true);
       const results = await queryMore(org, nextRecordsUrl, isTooling);
       if (!isMounted.current) {
@@ -133,13 +120,33 @@ export const SubqueryRenderer: FunctionComponent<FormatterProps<RowWithKey, unkn
 
   return (
     <DataTableSubqueryContext.Consumer>
-      {({ serverUrl, org, columnDefinitions, isTooling, google_apiKey, google_appId, google_clientId }) => {
+      {(props) => {
+        if (!props) {
+          return null;
+        }
+        const {
+          serverUrl,
+          skipFrontdoorLogin,
+          org,
+          columnDefinitions,
+          onSubqueryFieldReorder,
+          isTooling,
+          google_apiKey,
+          google_appId,
+          google_clientId,
+        } = props;
+
+        if (!columnDefinitions || !columnDefinitions[column.key]) {
+          return null;
+        }
+
         return (
           <div>
             {(downloadModalIsActive || isActive) && (
               <ModalDataTable
                 isActive={isActive}
                 columnKey={column.key}
+                columns={columnDefinitions[column.key]!}
                 modalTagline={modalTagline}
                 queryResults={queryResults}
                 selectedRows={selectedRows}
@@ -149,9 +156,11 @@ export const SubqueryRenderer: FunctionComponent<FormatterProps<RowWithKey, unkn
                 org={org}
                 downloadModalIsActive={downloadModalIsActive}
                 serverUrl={serverUrl}
+                skipFrontdoorLogin={skipFrontdoorLogin}
                 google_apiKey={google_apiKey}
                 google_appId={google_appId}
                 google_clientId={google_clientId}
+                onSubqueryFieldReorder={onSubqueryFieldReorder}
                 loadMore={loadMore}
                 openDownloadModal={openDownloadModal}
                 handleCloseModal={handleCloseModal}
@@ -174,15 +183,17 @@ export const SubqueryRenderer: FunctionComponent<FormatterProps<RowWithKey, unkn
 interface ModalDataTableProps extends SubqueryContext {
   isActive: boolean;
   columnKey: string;
-  modalTagline: string;
+  columns: ColumnWithFilter<any, unknown>[];
+  modalTagline?: Maybe<string>;
   queryResults: QueryResult<any>;
   isLoadingMore: boolean;
   selectedRows: ReadonlySet<string>;
   downloadModalIsActive: boolean;
+  onSubqueryFieldReorder?: (columnKey: string, fields: string[], columnOrder: number[]) => void;
   loadMore: (org: SalesforceOrgUi, isTooling: boolean) => void;
   openDownloadModal: () => void;
   handleCloseModal: (cancelled?: boolean) => void;
-  handleCopyToClipboard: (columns: ColumnWithFilter<any, unknown>[]) => void;
+  handleCopyToClipboard: (fields: string[]) => void;
   handleRowAction: (row: any, action: 'view' | 'edit' | 'clone' | 'apex') => void;
   setSelectedRows: (rows: ReadonlySet<string>) => void;
 }
@@ -190,6 +201,7 @@ interface ModalDataTableProps extends SubqueryContext {
 function ModalDataTable({
   isActive,
   columnKey,
+  columns,
   modalTagline,
   queryResults,
   selectedRows,
@@ -199,9 +211,11 @@ function ModalDataTable({
   org,
   downloadModalIsActive,
   serverUrl,
+  skipFrontdoorLogin,
   google_apiKey,
   google_appId,
   google_clientId,
+  onSubqueryFieldReorder,
   loadMore,
   openDownloadModal,
   handleCloseModal,
@@ -210,83 +224,44 @@ function ModalDataTable({
   setSelectedRows,
 }: ModalDataTableProps) {
   const modalRef = useRef();
-  const [contextMenuItems, setContextMenuItems] = useState<ContextMenuItem[]>([]);
-
-  useEffect(() => {
-    setContextMenuItems([
-      { label: 'Copy row to clipboard with header', value: 'COPY_ROW' },
-      { label: 'Copy row to clipboard without header', value: 'COPY_ROW_NO_HEADER', divider: true },
-
-      { label: 'Copy column to clipboard with header', value: 'COPY_COL' },
-      { label: 'Copy column to clipboard without header', value: 'COPY_COL_NO_HEADER', divider: true },
-
-      { label: 'Copy table to clipboard with header', value: 'COPY_TABLE' },
-      { label: 'Copy table to clipboard without header', value: 'COPY_TABLE_NO_HEADER' },
-    ]);
-  }, []);
 
   const { records, done, totalSize } = queryResults;
 
-  const columns = getColumns(columnDefinitions) || [];
-  const columnKeys = columns?.map((col) => col.key) || null;
-  const fields = columns.filter((column) => column.key && !NON_DATA_COLUMN_KEYS.has(column.key)).map((column) => column.key);
-  const rows = records.map((row) => {
+  const { fields: _fields, rows } = useMemo(() => {
+    const columnKeys = columns?.map((col) => col.key) || null;
+    const fields = columns.filter((column) => column.key && !NON_DATA_COLUMN_KEYS.has(column.key)).map((column) => column.key);
+    const rows = records.map((row) => {
+      return {
+        _key: getRowId(row),
+        _action: handleRowAction,
+        _record: row,
+        ...(columnKeys ? flattenRecord(row, columnKeys, false) : row),
+      };
+    });
     return {
-      _key: getRowId(row),
-      _action: handleRowAction,
-      _record: row,
-      ...(columnKeys ? flattenRecord(row, columnKeys, false) : row),
+      fields,
+      rows,
     };
-  });
+  }, [columns, handleRowAction, records]);
 
-  function getColumns(subqueryColumns: SalesforceQueryColumnDefinition<any>['subqueryColumns']) {
-    return subqueryColumns[columnKey];
-  }
+  const [fields, setFields] = useState(_fields);
 
-  // NOTE: this logic is duplicated in SalesforceRecordDataTable.tsx
-  // we could potentially combine them into a single component
+  useEffect(() => {
+    setFields(_fields);
+  }, [_fields]);
+
   const handleContextMenuAction = useCallback(
-    (
-      item: ContextMenuItem<'COPY_ROW' | 'COPY_ROW_NO_HEADER' | 'COPY_COL' | 'COPY_COL_NO_HEADER' | 'COPY_TABLE' | 'COPY_TABLE_NO_HEADER'>,
-      { row, rows, column, columns }: ContextMenuActionData<RowWithKey>
-    ) => {
-      let includeHeader = true;
-      let recordsToCopy: any[] = [];
-      const records = rows.map((row) => row._record);
-      const fieldsSet = new Set(fields);
-      let fieldsToCopy = columns.map((column) => column.key).filter((field) => fieldsSet.has(field)); // prefer this over fields because it accounts for reordering
-      logger.info('row action', item.value, { record: row._record, column });
-      // NOTE: FALLTHROUGH IS INTENTIONAL
-      switch (item.value) {
-        case 'COPY_ROW_NO_HEADER':
-          includeHeader = false;
-        case 'COPY_ROW':
-          recordsToCopy = [row._record];
-          break;
-
-        case 'COPY_COL_NO_HEADER':
-          includeHeader = false;
-        case 'COPY_COL':
-          fieldsToCopy = fieldsToCopy.filter((field) => field === column.key);
-          recordsToCopy = records.map((row) => ({ [column.key]: row[column.key] }));
-          break;
-
-        case 'COPY_TABLE_NO_HEADER':
-          includeHeader = false;
-        case 'COPY_TABLE':
-          recordsToCopy = records;
-          break;
-
-        default:
-          break;
-      }
-      if (recordsToCopy.length) {
-        const flattenedData = flattenRecords(recordsToCopy, fieldsToCopy);
-        copyToClipboard(transformTabularDataToExcelStr(flattenedData, fieldsToCopy, includeHeader), { format: 'text/plain' });
-      }
+    (item: ContextMenuItem<ContextAction>, data: ContextMenuActionData<RowWithKey>) => {
+      copySalesforceRecordTableDataToClipboard(item.value, fields, data);
     },
     [fields]
   );
+
+  const handleColumnReorder = useCallback((columns: string[], columnOrder: number[]) => {
+    setFields(columns);
+    onSubqueryFieldReorder && onSubqueryFieldReorder(columnKey, columns, columnOrder);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
@@ -326,7 +301,7 @@ function ModalDataTable({
               <div>
                 <button
                   className="slds-button slds-button_neutral"
-                  onClick={() => handleCopyToClipboard(columns)}
+                  onClick={() => handleCopyToClipboard(fields)}
                   title="Copy the queried records to the clipboard. The records can then be pasted into a spreadsheet."
                 >
                   <Icon type="utility" icon="copy_to_clipboard" className="slds-button__icon slds-button__icon_left" omitContainer />
@@ -349,19 +324,19 @@ function ModalDataTable({
           >
             <AutoFullHeightContainer fillHeight setHeightAttr bottomBuffer={300}>
               <DataTable
-                allowReorder
                 serverUrl={serverUrl}
+                skipFrontdoorLogin={skipFrontdoorLogin}
                 org={org}
                 data={rows}
                 columns={columns}
                 getRowKey={getRowId}
-                // onCopy={handleCopy}
                 rowHeight={28.5}
                 selectedRows={selectedRows}
                 onSelectedRowsChange={setSelectedRows as any}
                 context={{ portalRefForFilters: modalRef }}
-                contextMenuItems={contextMenuItems}
+                contextMenuItems={TABLE_CONTEXT_MENU_ITEMS}
                 contextMenuAction={handleContextMenuAction}
+                onReorderColumns={handleColumnReorder}
               />
             </AutoFullHeightContainer>
           </div>
@@ -375,7 +350,6 @@ function ModalDataTable({
           google_clientId={google_clientId}
           downloadModalOpen
           fields={fields}
-          modifiedFields={fields}
           records={records}
           onModalClose={handleCloseModal}
         />

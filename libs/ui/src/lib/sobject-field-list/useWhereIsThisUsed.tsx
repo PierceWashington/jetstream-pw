@@ -2,7 +2,7 @@ import { logger } from '@jetstream/shared/client-logger';
 import { clearCacheForOrg, queryWithCache } from '@jetstream/shared/data';
 import { useReducerFetchFn } from '@jetstream/shared/ui-utils';
 import { ListItem, SalesforceOrgUi } from '@jetstream/types';
-import { orderBy } from 'lodash';
+import orderBy from 'lodash/orderBy';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
 
 export interface MetadataDependencyEntityDefinition {
@@ -19,10 +19,8 @@ export interface MetadataDependency {
   MetadataComponentType: string;
 }
 
-const HAS_NAMESPACE = /__/;
-
 function getEntityDefinitionQuery(sobject: string, field: string) {
-  let namespace: string;
+  let namespace: string | undefined = undefined;
   if (field.includes('__')) {
     const [_namespace, fieldWithoutNamespace] = field.split('__');
     namespace = _namespace;
@@ -44,7 +42,7 @@ function getDependencyQuery(RefMetadataComponentId: string) {
 }
 
 export function useWhereIsThisUsed(org: SalesforceOrgUi, sobject: string, field: string) {
-  const isMounted = useRef(null);
+  const isMounted = useRef(true);
 
   const [{ hasLoaded, loading, data, hasError, errorMessage }, dispatch] = useReducer(
     useReducerFetchFn<ListItem<string, MetadataDependency>[]>(),

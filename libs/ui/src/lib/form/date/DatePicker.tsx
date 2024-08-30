@@ -3,14 +3,15 @@
 import { useNonInitialEffect } from '@jetstream/shared/ui-utils';
 import { PositionLeftRight } from '@jetstream/types';
 import classNames from 'classnames';
-import formatISO from 'date-fns/formatISO';
-import isAfter from 'date-fns/isAfter';
-import isBefore from 'date-fns/isBefore';
-import isSameDay from 'date-fns/isSameDay';
-import isValidDate from 'date-fns/isValid';
-import parseISO from 'date-fns/parseISO';
-import startOfDay from 'date-fns/startOfDay';
-import { ChangeEvent, FunctionComponent, KeyboardEvent, useEffect, useState } from 'react';
+import { formatISO } from 'date-fns/formatISO';
+import { isAfter } from 'date-fns/isAfter';
+import { isBefore } from 'date-fns/isBefore';
+import { isSameDay } from 'date-fns/isSameDay';
+import { isValid as isValidDate } from 'date-fns/isValid';
+import { parseISO } from 'date-fns/parseISO';
+import { startOfDay } from 'date-fns/startOfDay';
+import { ChangeEvent, FunctionComponent, KeyboardEvent, useEffect, useRef, useState } from 'react';
+import PopoverContainer from '../../popover/PopoverContainer';
 import OutsideClickHandler from '../../utils/OutsideClickHandler';
 import HelpText from '../../widgets/HelpText';
 import Icon from '../../widgets/Icon';
@@ -22,8 +23,8 @@ export interface DatePickerProps {
   // choose contents to ensure full width display
   containerDisplay?: 'block' | 'flex' | 'inline' | 'inline-block' | 'contents';
   label: string;
-  hideLabel?: boolean;
-  labelHelp?: string;
+  hideLabel?: boolean | null;
+  labelHelp?: string | null;
   helpText?: React.ReactNode | string;
   isRequired?: boolean;
   hasError?: boolean;
@@ -36,7 +37,10 @@ export interface DatePickerProps {
   dropDownPosition?: PositionLeftRight;
   disabled?: boolean;
   readOnly?: boolean;
-  onChange: (date: Date) => void;
+  inputProps?: React.DetailedHTMLProps<React.InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>;
+  usePortal?: boolean;
+  openOnInit?: boolean;
+  onChange: (date: Date | null) => void;
 }
 
 export const DatePicker: FunctionComponent<DatePickerProps> = ({
@@ -58,14 +62,19 @@ export const DatePicker: FunctionComponent<DatePickerProps> = ({
   dropDownPosition,
   disabled,
   readOnly,
+  inputProps,
+  openOnInit = false,
+  usePortal = false,
   onChange,
 }) => {
   initialSelectedDate = isValidDate(initialSelectedDate) ? initialSelectedDate : undefined;
   initialVisibleDate = isValidDate(initialVisibleDate) ? initialVisibleDate : undefined;
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [popoverRef, setPopoverRef] = useState<HTMLDivElement | null>(null);
   const [id] = useState<string>(`${_id || 'date-picker'}-${Date.now()}`); // used to avoid auto-complete
   const [value, setValue] = useState<string>('');
   const [selectedDate, setSelectedDate] = useState(() => (isValidDate(initialSelectedDate) ? initialSelectedDate : undefined));
-  const [isOpen, setIsOpen] = useState(false);
+  const [isOpen, setIsOpen] = useState(openOnInit);
   const [availableYears, setAvailableYears] = useState(() => getDatePickerYears(initialMinAvailableDate, initialMaxAvailableDate));
 
   const [minAvailableDate, setMinAvailableDate] = useState(initialMinAvailableDate);
@@ -141,7 +150,12 @@ export const DatePicker: FunctionComponent<DatePickerProps> = ({
   }
 
   return (
-    <OutsideClickHandler display={containerDisplay} className="slds-combobox_container" onOutsideClick={() => handleToggleOpen(false)}>
+    <OutsideClickHandler
+      additionalParentRef={popoverRef}
+      display={containerDisplay}
+      className="slds-combobox_container"
+      onOutsideClick={() => handleToggleOpen(false)}
+    >
       <div
         className={classNames(
           'slds-form-element slds-dropdown-trigger slds-dropdown-trigger_click',
@@ -160,6 +174,7 @@ export const DatePicker: FunctionComponent<DatePickerProps> = ({
         {!hideLabel && labelHelp && <HelpText id={`${id}-label-help-text`} content={labelHelp} />}
         <div className="slds-form-element__control slds-input-has-icon slds-input-has-icon_right">
           <input
+            ref={inputRef}
             aria-describedby={errorMessageId}
             type="text"
             autoComplete="false"
@@ -180,6 +195,7 @@ export const DatePicker: FunctionComponent<DatePickerProps> = ({
               }
             }}
             disabled={disabled}
+            {...inputProps}
           />
           <button
             className="slds-button slds-button_icon slds-input__icon slds-input__icon_right"
@@ -190,7 +206,13 @@ export const DatePicker: FunctionComponent<DatePickerProps> = ({
             {!readOnly && <Icon type="utility" icon="event" className="slds-button__icon" omitContainer description="Select a date" />}
           </button>
         </div>
-        {isOpen && (
+        <PopoverContainer
+          ref={setPopoverRef}
+          isOpen={isOpen}
+          className={`slds-datepicker`}
+          referenceElement={inputRef.current}
+          usePortal={usePortal}
+        >
           <DatePickerPopup
             initialSelectedDate={selectedDate}
             initialVisibleDate={initialVisibleDate || selectedDate}
@@ -202,7 +224,7 @@ export const DatePicker: FunctionComponent<DatePickerProps> = ({
             onSelection={handleDateSelection}
             onClear={handleClear}
           />
-        )}
+        </PopoverContainer>
         {helpText && <div className="slds-form-element__help">{helpText}</div>}
         {hasError && errorMessage && (
           <div className="slds-form-element__help" id={errorMessageId}>
@@ -220,7 +242,7 @@ export const DatePicker: FunctionComponent<DatePickerProps> = ({
  * @param minAvailableDate The year from this date is used for the earliest year. Defaults to 1970
  * @param maxAvailableDate The year from this date is used for the latest year. Defaults to current year + 50
  */
-export function getDatePickerYears(minAvailableDate?: Date, maxAvailableDate?: Date) {
+export function getDatePickerYears(minAvailableDate?: Date | null, maxAvailableDate?: Date | null) {
   let minYear = minAvailableDate?.getFullYear() || 1969;
   const maxYear = maxAvailableDate?.getFullYear() || new Date().getFullYear() + 50;
   if (minYear > maxYear) {

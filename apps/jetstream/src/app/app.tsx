@@ -1,6 +1,7 @@
-import { UserProfileUi } from '@jetstream/types';
-import { ConfirmationServiceProvider } from '@jetstream/ui';
+import { Maybe, UserProfileUi } from '@jetstream/types';
+import { AppToast, ConfirmationServiceProvider } from '@jetstream/ui';
 // import { initSocket } from '@jetstream/shared/data';
+import { AppLoading, DownloadFileStream, ErrorBoundaryFallback, HeaderNavbar } from '@jetstream/ui-core';
 import { OverlayProvider } from '@react-aria/overlays';
 import { Suspense, useEffect, useState } from 'react';
 import { DndProvider } from 'react-dnd';
@@ -11,14 +12,10 @@ import { RecoilRoot } from 'recoil';
 import { environment } from '../environments/environment';
 import { AppRoutes } from './AppRoutes';
 import AppInitializer from './components/core/AppInitializer';
-import AppLoading from './components/core/AppLoading';
 import AppStateResetOnOrgChange from './components/core/AppStateResetOnOrgChange';
-import AppToast from './components/core/AppToast';
-import ErrorBoundaryFallback from './components/core/ErrorBoundaryFallback';
-import HeaderNavbar from './components/core/HeaderNavbar';
 import LogInitializer from './components/core/LogInitializer';
-import './components/core/monaco-loader';
 import NotificationsRequestModal from './components/core/NotificationsRequestModal';
+import './components/core/monaco-loader';
 
 /**
  * TODO: disabled socket from browser until we have a solid use-case for it
@@ -27,12 +24,12 @@ import NotificationsRequestModal from './components/core/NotificationsRequestMod
 // initSocket();
 
 export const App = () => {
-  const [userProfile, setUserProfile] = useState<UserProfileUi>();
+  const [userProfile, setUserProfile] = useState<Maybe<UserProfileUi>>();
   const [featureFlags, setFeatureFlags] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (userProfile && userProfile[environment.authAudience]?.featureFlags) {
-      const flags = new Set<string>(userProfile[environment.authAudience].featureFlags.flags);
+    if (userProfile && userProfile[environment.authAudience || '']?.featureFlags) {
+      const flags = new Set<string>(userProfile[environment.authAudience || ''].featureFlags.flags);
       setFeatureFlags(flags);
     }
   }, [userProfile]);
@@ -49,6 +46,7 @@ export const App = () => {
                 <AppToast />
                 <LogInitializer />
                 <NotificationsRequestModal featureFlags={featureFlags} loadDelay={10000} />
+                <DownloadFileStream />
                 <div>
                   <div data-testid="header">
                     <HeaderNavbar userProfile={userProfile} featureFlags={featureFlags} />

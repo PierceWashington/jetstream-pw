@@ -1,7 +1,7 @@
 import { css } from '@emotion/react';
 import { logger } from '@jetstream/shared/client-logger';
 import { readFile, useGlobalEventHandler } from '@jetstream/shared/ui-utils';
-import { InputAcceptType, InputReadFileContent } from '@jetstream/types';
+import { InputAcceptType, InputReadFileContent, Maybe } from '@jetstream/types';
 import classNames from 'classnames';
 import isString from 'lodash/isString';
 import { FunctionComponent, useCallback, useRef, useState } from 'react';
@@ -14,11 +14,12 @@ export interface FileSelectorProps {
   id: string;
   label: string;
   buttonLabel?: string;
-  labelHelp?: string;
+  labelHelp?: string | null;
   /** @deprecated I guess? is not used in code, use `userHelpText` instead */
   helpText?: React.ReactNode | string; // FIXME: does not appear to be used, userHelpText is used
   isRequired?: boolean;
-  filename?: string; // optional, will be managed if not provided
+  filename?: Maybe<string>; // optional, will be managed if not provided
+  omitFilename?: boolean;
   hideLabel?: boolean;
   disabled?: boolean;
   accept?: InputAcceptType[];
@@ -27,6 +28,7 @@ export interface FileSelectorProps {
   hasError?: boolean;
   errorMessage?: React.ReactNode | string;
   maxAllowedSizeMB?: number;
+  allowMultipleFiles?: boolean;
   onReadFile: (fileContent: InputReadFileContent) => void;
 }
 
@@ -37,6 +39,7 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
   buttonLabel = 'Upload File',
   labelHelp,
   filename,
+  omitFilename = false,
   isRequired,
   hideLabel,
   disabled,
@@ -46,13 +49,14 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
   hasError,
   errorMessage,
   maxAllowedSizeMB,
+  allowMultipleFiles = false,
   onReadFile,
 }) => {
   const [labelPrimaryId] = useState(() => `${id}-label-primary`);
   const [labelSecondaryId] = useState(() => `${id}-label`);
-  const [systemErrorMessage, setSystemErrorMessage] = useState<string>(null);
+  const [systemErrorMessage, setSystemErrorMessage] = useState<string | null>(null);
   const [isDraggingOver, setIsDraggingOver] = useState(false);
-  const inputRef = useRef<HTMLInputElement>();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [{ managedFilename, filenameTruncated }, setManagedFilename] = useFilename(filename);
 
   function preventEventDefaults(event: React.DragEvent<HTMLDivElement> | React.ChangeEvent<HTMLInputElement>) {
@@ -77,21 +81,31 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
 
   function handleInputChange(event: React.ChangeEvent<HTMLInputElement>) {
     preventEventDefaults(event);
-    handleFiles(event.target?.files);
+    event.target?.files && handleFiles(event.target.files);
   }
 
   const handlePaste = useCallback(
     (event: ClipboardEvent) => {
-      if (!allowFromClipboard || !event.clipboardData || !event.clipboardData.items) {
-        return;
-      }
-      const items = event.clipboardData.items;
-      items[0].getAsString((content) => {
-        if (content && content.split('\n').length > 1) {
-          setManagedFilename('Clipboard-Paste.csv');
-          onReadFile({ filename: 'Clipboard-Paste.csv', extension: '.csv', content, isPasteFromClipboard: true });
+      try {
+        if (!allowFromClipboard || !event.clipboardData || !event.clipboardData?.items?.length) {
+          return;
         }
-      });
+        const item = event.clipboardData.items[0];
+        if (item.kind === 'file') {
+          setSystemErrorMessage(null);
+          setManagedFilename(null);
+          handleFile(item.getAsFile());
+        } else if (item.kind === 'string') {
+          item.getAsString((content) => {
+            if (content && content.split('\n').length > 1) {
+              setManagedFilename('Clipboard-Paste.csv');
+              onReadFile({ filename: 'Clipboard-Paste.csv', extension: '.csv', content, isPasteFromClipboard: true });
+            }
+          });
+        }
+      } catch (ex) {
+        logger.warn('[CLIPBOARD] Failed to handle clipboard paste', ex);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allowFromClipboard, setManagedFilename]
@@ -105,10 +119,21 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
       setManagedFilename(null);
       if (!files || files.length === 0) {
         return;
-      } else if (files.length > 1) {
+      } else if (!allowMultipleFiles && files.length > 1) {
         throw new Error('Only 1 file is supported');
       }
-      const file = files.item(0);
+      handleFile(files.item(0));
+    } catch (ex) {
+      setSystemErrorMessage(ex.message);
+      setManagedFilename(null);
+    }
+  }
+
+  async function handleFile(file: File | null) {
+    try {
+      if (!file) {
+        return;
+      }
       logger.info(file);
       const fileSizeMb = file.size / 1000 / 1000;
 
@@ -124,8 +149,7 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
 
       setManagedFilename(file.name);
 
-      // TODO: we might want to do something else here in the future
-      const readAsArrayBuffer = extension !== '.csv' && extension !== '.xml';
+      const readAsArrayBuffer = extension !== '.csv' && extension !== '.tsv' && extension !== '.xml';
       const content = await (readAsArrayBuffer ? readFile(file, 'array_buffer') : readFile(file, 'text'));
 
       onReadFile({ filename: file.name, extension, content });
@@ -168,6 +192,7 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
               type="file"
               className="slds-file-selector__input slds-assistive-text"
               accept={accept ? accept.join(', ') : undefined}
+              multiple={allowMultipleFiles}
               id={id}
               aria-describedby={`${id}-file-input-help ${id}-file-input-system-error ${id}-file-input-error ${id}-file-input-name`}
               aria-labelledby={`${labelPrimaryId} ${labelSecondaryId}`}
@@ -190,7 +215,7 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
           min-height: 20px;
         `}
       >
-        {userHelpText && !managedFilename && (
+        {!!userHelpText && !managedFilename && (
           <div
             className="slds-form-element__help slds-truncate"
             id={`${id}-file-input-help`}
@@ -199,8 +224,8 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
             {userHelpText}
           </div>
         )}
-        {managedFilename && (
-          <div className="slds-form-element__help slds-truncate" id={`${id}-file-input-name`} title={managedFilename}>
+        {!omitFilename && filenameTruncated && (
+          <div className="slds-form-element__help slds-truncate" id={`${id}-file-input-name`} title={managedFilename || ''}>
             {filenameTruncated}
           </div>
         )}
@@ -211,7 +236,7 @@ export const FileSelector: FunctionComponent<FileSelectorProps> = ({
         )}
         {hasError && errorMessage && (
           <div className="slds-form-element__help slds-truncate" id={`${id}-file-input-error`}>
-            {systemErrorMessage}
+            {errorMessage}
           </div>
         )}
       </div>

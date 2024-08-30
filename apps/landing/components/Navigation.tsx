@@ -1,12 +1,14 @@
+/* eslint-disable @next/next/no-img-element */
 import { Popover, Transition } from '@headlessui/react';
 import { MenuIcon, XIcon } from '@heroicons/react/outline';
 import classNames from 'classnames';
 import Link from 'next/link';
-import React, { Fragment } from 'react';
+import { Fragment } from 'react';
 
 const navigation = [
   { name: 'Features', href: '/#features' },
   { name: 'Documentation', href: 'https://docs.getjetstream.app/', target: '_blank' },
+  { name: 'Privacy & Security', href: '/privacy' },
   { name: 'Blog', href: '/blog' },
 ];
 

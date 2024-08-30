@@ -1,10 +1,9 @@
 import { logger } from '@jetstream/shared/client-logger';
 import { clearCacheForOrg, describeMetadata as describeMetadataApi } from '@jetstream/shared/data';
 import { useNonInitialEffect, useRollbar } from '@jetstream/shared/ui-utils';
-import { orderStringsBy } from '@jetstream/shared/utils';
-import { MapOf, SalesforceOrgUi } from '@jetstream/types';
-import formatRelative from 'date-fns/formatRelative';
-import { DescribeMetadataResult, MetadataObject } from 'jsforce';
+import { orderValues } from '@jetstream/shared/utils';
+import { DescribeMetadataResult, MetadataObject, SalesforceOrgUi } from '@jetstream/types';
+import { formatRelative } from 'date-fns/formatRelative';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { METADATA_TYPES_TO_OMIT } from './utils';
 
@@ -13,21 +12,21 @@ let _lastRefreshed: string;
 export function useDescribeMetadata(
   selectedOrg: SalesforceOrgUi,
   initialItems?: string[],
-  initialMetadataItemMap?: MapOf<MetadataObject>,
+  initialMetadataItemMap?: Record<string, MetadataObject>,
   loadOnInit = true
 ) {
-  const isMounted = useRef(null);
+  const isMounted = useRef(true);
   const rollbar = useRollbar();
   // map of each item or child item to parent item
-  const [metadataItemMap, setMetadataItemMap] = useState<MapOf<MetadataObject>>(initialMetadataItemMap || {});
-  const [metadataItems, setMetadataItems] = useState<string[]>(initialItems);
+  const [metadataItemMap, setMetadataItemMap] = useState<Record<string, MetadataObject>>(initialMetadataItemMap || {});
+  const [metadataItems, setMetadataItems] = useState<string[] | undefined>(initialItems);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [hasError, setHasError] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<string>(_lastRefreshed);
-  const [orgInformation, setOrgInformation] = useState<Omit<DescribeMetadataResult, 'metadataObjects'>>(null);
-  const [orgIdUsedToFetch, setOrgIdUsedToFetch] = useState<string>();
+  const [orgInformation, setOrgInformation] = useState<Omit<DescribeMetadataResult, 'metadataObjects'> | null>(null);
+  const [orgIdUsedToFetch, setOrgIdUsedToFetch] = useState<string | null>(null);
 
   useEffect(() => {
     isMounted.current = true;
@@ -86,7 +85,7 @@ export function useDescribeMetadata(
         const { items, itemMap } = data.metadataObjects
           .filter((item) => !!item)
           .reduce(
-            (output: { items: string[]; itemMap: MapOf<MetadataObject> }, item) => {
+            (output: { items: string[]; itemMap: Record<string, MetadataObject> }, item) => {
               // map parent item
               output.items.push(item.xmlName);
               output.itemMap[item.xmlName] = item;
@@ -109,10 +108,9 @@ export function useDescribeMetadata(
           );
 
         setMetadataItemMap(itemMap);
-        setMetadataItems(orderStringsBy(items.filter((item) => !METADATA_TYPES_TO_OMIT.has(item))));
+        setMetadataItems(orderValues(items.filter((item) => !METADATA_TYPES_TO_OMIT.has(item))));
       } catch (ex) {
         logger.error(ex);
-        rollbar.error('Describe Metadata Failed', ex);
         if (!isMounted.current || uniqueId !== selectedOrg.uniqueId) {
           return;
         }

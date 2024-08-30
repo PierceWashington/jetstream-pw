@@ -1,10 +1,8 @@
 // Used SQL as a starting point
 // https://github.com/microsoft/monaco-languages/blob/main/src/sql/sql.ts
 // TODO: consider open sourcing the apex part
+import { formatQuery } from '@jetstreamapp/soql-parser-js';
 import type * as monaco from 'monaco-editor';
-
-// lazy load to ensure not in main bundle
-const soqlParserJs = import('soql-parser-js');
 
 type Monaco = typeof monaco;
 
@@ -18,7 +16,7 @@ export function configureSoqlLanguage(monaco: Monaco) {
       return [
         {
           range: model.getFullModelRange(),
-          text: (await soqlParserJs).formatQuery(model.getValue()),
+          text: formatQuery(model.getValue()),
         },
       ];
     },

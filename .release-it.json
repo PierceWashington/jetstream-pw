@@ -1,22 +1,21 @@
 {
-  "plugins": {
-    "@release-it/bumper": {
-      "in": "package.json"
-    }
-  },
+  "$schema": "https://unpkg.com/release-it@17/schema/release-it.json",
+  "plugins": {},
   "git": {
     "commitMessage": "chore: release ${version}",
     "tag": true,
-    "tagName": "v${version}"
+    "tagName": "v${version}",
+    "requireBranch": "main"
   },
   "npm": {
     "publish": false
   },
   "github": {
-    "release": true
+    "release": true,
+    "releaseName": "Jetstream ${version}"
   },
   "hooks": {
-    "before:bump": "SKIP_ROLLBAR=true yarn build",
-    "after:release": "CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git checkout release && git reset --hard $CURRENT_BRANCH && git push origin release -f && git checkout main"
+    "before:init": ["yarn test:all", "SKIP_ROLLBAR=true yarn build"],
+    "after:release": "CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD) && git checkout release && git reset --hard $CURRENT_BRANCH && git push origin release -f && git checkout main && yarn rollbar:create-deploy"
   }
 }

@@ -1,9 +1,8 @@
-import { QueryResultsColumn } from '@jetstream/api-interfaces';
-import type { ChildRelationship, DescribeSObjectResult, Field } from 'jsforce';
 import type { ReactNode } from 'react';
 import type * as XLSX from 'xlsx';
-import { DeployOptions, DeployResult, DeployResultStatus, ListMetadataResult } from '../salesforce/types';
-import { HttpMethod, MapOf, SalesforceOrgUi } from '../types';
+import { DeployOptions, DeployResult, DeployResultStatus, ListMetadataResult } from '../salesforce/metadata.types';
+import { ChildRelationship, DescribeSObjectResult, Field } from '../salesforce/sobject.types';
+import { HttpMethod, Maybe, QueryResultsColumn, SalesforceOrgUi } from '../types';
 
 export type DropDownItemLength = 5 | 7 | 10;
 
@@ -17,8 +16,8 @@ export interface UseReducerFetchState<T> {
   hasLoaded: boolean;
   loading: boolean;
   hasError: boolean;
-  errorMessage?: string | null;
-  data: T;
+  errorMessage?: Maybe<string>;
+  data: Maybe<T>;
 }
 
 export type FileExtCsv = 'csv';
@@ -47,7 +46,8 @@ export interface WorkerMessage<T, K = any, E = any> {
 
 export interface QueryFieldWithPolymorphic {
   field: string;
-  polymorphicObj: string;
+  polymorphicObj: Maybe<string>;
+  metadata: Field;
 }
 
 export interface QueryFields {
@@ -60,7 +60,7 @@ export interface QueryFields {
   filterTerm: string;
   sobject: string;
   isPolymorphic: boolean;
-  fields: MapOf<FieldWrapper>;
+  fields: Record<string, FieldWrapper>;
   childRelationships?: ChildRelationship[];
   visibleFields: Set<string>;
   selectedFields: Set<string>;
@@ -83,15 +83,15 @@ export interface FieldWrapper {
 // Tabs / Accordion / etc..
 export interface UiSection {
   id: string;
-  testId?: string;
+  testId?: Maybe<string>;
   title: string | ReactNode;
-  titleSummaryIfCollapsed?: string | ReactNode; // extra title content to show if collapsed
-  titleText?: string; // use if title is not a string
+  titleSummaryIfCollapsed?: Maybe<string | ReactNode>; // extra title content to show if collapsed
+  titleText?: Maybe<string>; // use if title is not a string
   // eslint-disable-next-line @typescript-eslint/ban-types
   content: React.ReactNode | Function; // => React.ReactNode
-  disabled?: boolean;
-  className?: string;
-  style?: React.CSSProperties;
+  disabled?: Maybe<boolean>;
+  className?: Maybe<string>;
+  style?: Maybe<React.CSSProperties>;
 }
 
 export interface UiTabSection {
@@ -202,9 +202,10 @@ export type MimeTypeJson = 'application/json;charset=utf-8';
 export type MimeTypeXML = 'text/xml;charset=utf-8';
 export type MimeTypeGSheet = 'application/vnd.google-apps.spreadsheet';
 
-export type InputAcceptType = InputAcceptTypeZip | InputAcceptTypeCsv | InputAcceptTypeExcel | InputAcceptTypeXml;
+export type InputAcceptType = InputAcceptTypeZip | InputAcceptTypeCsv | InputAcceptTypeTsv | InputAcceptTypeExcel | InputAcceptTypeXml;
 export type InputAcceptTypeZip = '.zip';
 export type InputAcceptTypeCsv = '.csv';
+export type InputAcceptTypeTsv = '.tsv';
 export type InputAcceptTypeExcel = '.xlsx';
 export type InputAcceptTypeXml = '.xml';
 
@@ -227,22 +228,37 @@ export type DefaultInverseLight = Default | Inverse | Light;
 export type BadgeTypes = SuccessWarningError | DefaultInverseLight;
 export type ScopedNotificationTypes = Info | Success | Warning | Error | Light | Dark;
 
-export interface ListItemGroup {
+export interface ListItemGroup<V = string, M = any> {
   id: string;
   label: string;
-  items: ListItem[];
+  items: ListItem<V, M>[];
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export interface ListItem<V = string, M = any> {
   id: string;
   label: string;
-  secondaryLabel?: string;
-  secondaryLabelOnNewLine?: boolean;
-  metaLabel?: string;
+  /** If provided, then this will be used for children ComboboxListItem */
+  customRenderer?: (item: ListItem<V, M>) => React.ReactNode;
+  secondaryLabel?: string | null;
+  secondaryLabelOnNewLine?: boolean | null;
+  /** Show a third label under the primary/secondary labels (Combobox) */
+  tertiaryLabel?: string;
+  disabled?: boolean;
+  metaLabel?: string | null;
+  /** used for flattened lists (used for virtual scrolling) */
+  isGroup?: Maybe<boolean>;
+  /** If list is flattened, group information should be attached to each item */
+  group?: Maybe<{ id: string; label: string }>;
+  /** If true, indicates that this item can be clicked on to drill in to a child menu */
+  isDrillInItem?: boolean;
+  // Keys of all parent items
+  parentId?: string;
+  // child items
+  childItems?: ListItem<V, M>[];
   value: V;
-  title?: string;
-  meta?: M;
+  title?: string | null;
+  meta?: M | null;
 }
 
 export type Previous = 'PREVIOUS';
@@ -290,6 +306,7 @@ export interface ExpressionConditionRowSelectedItems<T = any> {
   resource: string | null;
   resourceMeta?: T;
   resourceGroup: string | null;
+  function: string | null;
   operator: QueryFilterOperator | null;
   resourceType?: ExpressionRowValueType;
   value: string | string[];
@@ -302,8 +319,8 @@ export interface ExpressionConditionHelpText {
 
 export interface ExpressionGetResourceTypeFns {
   // used to allow user selection of multiple types - if provided, adds dropdown before value
-  getTypes?: (selected: ExpressionConditionRowSelectedItems) => ListItem<ExpressionRowValueType>[];
-  getType: (selected: ExpressionConditionRowSelectedItems) => ExpressionRowValueType;
+  getTypes?: (selected: ExpressionConditionRowSelectedItems) => ListItem<ExpressionRowValueType>[] | undefined;
+  getType: (selected: ExpressionConditionRowSelectedItems) => ExpressionRowValueType | undefined;
   // used to display optional text below the row
   getHelpText?: (selected: ExpressionConditionRowSelectedItems) => ExpressionConditionHelpText | undefined;
   // optional function to mutate the selected properties (e.x. convert value from/to array from string)
@@ -335,9 +352,16 @@ export type QueryFilterOperator =
 export interface QueryOrderByClause {
   key: number;
   field: string | null;
-  fieldLabel: string;
+  fieldLabel: string | null;
   order: AscDesc;
   nulls: FirstLast | null;
+}
+
+export interface QueryGroupByClause {
+  key: number;
+  field: string | null;
+  fieldLabel: string | null;
+  function: string | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -345,7 +369,11 @@ export interface DropDownItem<T = any> {
   id: string;
   subheader?: string;
   value: string | ReactNode;
-  icon?: any; // FIXME:
+  icon?: {
+    type: string;
+    icon: string;
+    description?: string;
+  }; // FIXME: unable to import cross module boundaries
   trailingDivider?: boolean;
   disabled?: boolean;
   title?: string;
@@ -365,7 +393,7 @@ export interface FormGroupDropdownItem {
   icon?: any; // FIXME:
 }
 
-export type AsyncJobType = 'isElectron' | 'init' | 'BulkDelete' | 'BulkDownload' | 'RetrievePackageZip' | 'UploadToGoogle' | 'CancelJob';
+export type AsyncJobType = 'init' | 'BulkDelete' | 'BulkDownload' | 'RetrievePackageZip' | 'UploadToGoogle' | 'CancelJob';
 export type AsyncJobStatus = 'pending' | 'in-progress' | 'success' | 'finished-warning' | 'failed' | 'aborted';
 
 export type AsyncJobNew<T = unknown> = Omit<AsyncJob<T>, 'id' | 'started' | 'finished' | 'lastActivity' | 'status' | 'statusMessage'>;
@@ -396,14 +424,14 @@ export interface AsyncJobWorkerMessageResponse<T = unknown, R = unknown> {
   results?: R;
 }
 
-export type JetstreamEventType = 'newJob' | 'jobFinished' | 'lastActivityUpdate' | 'addOrg';
-export type JetstreamEvents = JetstreamEventJobFinished | JetstreamEventLastActivityUpdate | JetstreamEventNewJob | JetstreamEventAddOrg;
-export interface JetstreamEventAddOrgPayload {
-  org: SalesforceOrgUi;
-  switchActiveOrg: boolean;
-  replaceOrgUniqueId?: string;
-}
-export type JetstreamEventPayloads = AsyncJob | AsyncJobNew[] | JetstreamEventAddOrgPayload;
+export type JetstreamEventType = 'newJob' | 'jobFinished' | 'lastActivityUpdate' | 'addOrg' | 'streamFileDownload';
+export type JetstreamEvents =
+  | JetstreamEventJobFinished
+  | JetstreamEventLastActivityUpdate
+  | JetstreamEventNewJob
+  | JetstreamEventAddOrg
+  | JetstreamEventStreamFile;
+export type JetstreamEventPayloads = AsyncJob | AsyncJobNew[] | JetstreamEventAddOrgPayload | JetstreamEventStreamFilePayload;
 
 export interface JetstreamEvent<T> {
   type: JetstreamEventType;
@@ -429,6 +457,19 @@ export interface JetstreamEventAddOrg extends JetstreamEvent<JetstreamEventPaylo
   type: 'addOrg';
   payload: JetstreamEventAddOrgPayload;
 }
+export interface JetstreamEventAddOrgPayload {
+  org: SalesforceOrgUi;
+  switchActiveOrg: boolean;
+}
+
+export interface JetstreamEventStreamFile extends JetstreamEvent<JetstreamEventPayloads> {
+  type: 'streamFileDownload';
+  payload: JetstreamEventStreamFilePayload;
+}
+export interface JetstreamEventStreamFilePayload {
+  link: string;
+  fileName: string;
+}
 
 export interface CancelJob {
   id: string;
@@ -438,20 +479,26 @@ export interface UploadToGoogleJob {
   fileName: string;
   fileData: any;
   fileType: FileExtCsvXLSX | FileExtZip;
-  googleFolder?: string;
+  googleFolder?: Maybe<string>;
 }
 
 export interface BulkDownloadJob {
+  serverUrl: string;
+  sObject: string;
+  soql: string;
   isTooling: boolean;
   totalRecordCount: number;
-  nextRecordsUrl: string;
+  nextRecordsUrl: Maybe<string>;
   fields: string[];
-  subqueryFields: MapOf<string[]>;
-  records: MapOf<string>[];
+  subqueryFields: Maybe<Record<string, string[]>>;
+  records: Record<string, string>[];
+  hasAllRecords: boolean;
   fileFormat: FileExtAllTypes;
   fileName: string;
-  googleFolder: string;
+  googleFolder: Maybe<string>;
   includeSubquery: boolean;
+  includeDeletedRecords: boolean;
+  useBulkApi: boolean;
 }
 
 export interface RetrievePackageJob {
@@ -460,12 +507,12 @@ export interface RetrievePackageJob {
   fileFormat: FileExtAllTypes;
   mimeType: MimeType;
   uploadToGoogle: boolean;
-  googleFolder?: string;
+  googleFolder?: Maybe<string>;
 }
 
 export interface RetrievePackageFromListMetadataJob extends RetrievePackageJob {
   type: 'listMetadata';
-  listMetadataItems: MapOf<ListMetadataResult[]>;
+  listMetadataItems: Record<string, ListMetadataResult[]>;
   fileName: string;
 }
 
@@ -505,6 +552,7 @@ export interface ApexHistoryItem {
   apex: string;
   lastRun: Date;
 }
+
 export interface SalesforceApiHistoryItem {
   key: string; // org:method:url
   org: string;
@@ -523,11 +571,11 @@ export interface SalesforceDeployHistoryItem {
   sourceOrg?: SalesforceDeploymentHistoryOrg;
   start: Date;
   finish: Date;
-  url?: string;
+  url?: string | null;
   status: DeployResultStatus;
   type: SalesforceDeployHistoryType;
   errorMessage?: string | null;
-  metadata?: MapOf<ListMetadataResult[]>; // TODO: are there other types of metadata?
+  metadata?: Record<string, ListMetadataResult[]>; // TODO: are there other types of metadata?
   deployOptions?: DeployOptions;
   results?: DeployResult;
 }
@@ -541,7 +589,7 @@ export interface SalesforceDeploymentHistoryOrg {
 export interface SalesforceApiHistoryRequest {
   method: HttpMethod;
   url: string;
-  headers: MapOf<string>;
+  headers: Record<string, string>;
   body: string;
   bodyType: 'JSON' | 'TEXT';
 }
@@ -614,10 +662,10 @@ export interface ApexLog {
 
 export type ApexLogWithViewed = Omit<ApexLog, 'LogLength'> & {
   viewed?: boolean;
-  LogLength: string;
-  'LogUser.Id': string;
-  'LogUser.Name': string;
-  'LogUser.Username': string;
+  LogLength: string | null;
+  'LogUser.Id': string | null;
+  'LogUser.Name': string | null;
+  'LogUser.Username': string | null;
 };
 
 export interface UserTrace {
@@ -650,27 +698,25 @@ export interface UseDebugLogsOptions {
 }
 
 export interface FetchDebugLogOptions {
-  asOfId?: string;
-  limit?: number;
-  userId?: string;
+  asOfId?: string | null;
+  limit?: number | null;
+  userId?: string | null;
 }
 
 export interface ChangeSet {
   name: string;
-  description: string;
+  description: string | null;
   link: string;
   status: 'Open' | 'Closed'; // not sure exact types
   modifiedBy: string;
   modifiedDate: string;
 }
 
-export interface ElectronPreferences {
-  isInitialized: boolean;
-  analyticsOptIn: boolean;
-  crashReportingOptIn: boolean;
-  downloadFolder: { prompt: true; location?: string } | { prompt: false; location: string };
-  defaultApiVersion: { override: boolean; overrideValue?: string }; // format: 54.0
-  // syncOrgs: boolean;
-  // notifications
-  // bounce dock
-}
+export type ValidationRule = 'ValidationRule';
+export type WorkflowRule = 'WorkflowRule';
+export type FlowProcessBuilder = 'FlowProcessBuilder';
+export type FlowRecordTriggered = 'FlowRecordTriggered';
+export type ApexTrigger = 'ApexTrigger';
+export type DuplicateRule = 'DuplicateRule';
+
+export type AutomationMetadataType = DuplicateRule | ValidationRule | WorkflowRule | FlowProcessBuilder | FlowRecordTriggered | ApexTrigger;
