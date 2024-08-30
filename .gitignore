@@ -6,8 +6,7 @@
 /out-tsc
 /logs
 
-.env
-.env.temp
+.envjs
 *.env
 
 # dependencies
@@ -57,3 +56,5 @@ package-lock.json
 **/test-results
 **/playwright-report
 **/playwright/.cache
+
+.cpqdevkit/**
