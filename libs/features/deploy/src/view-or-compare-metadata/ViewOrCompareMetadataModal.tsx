@@ -3,20 +3,22 @@ import { logger } from '@jetstream/shared/client-logger';
 import { isBrowserExtension, useNonInitialEffect } from '@jetstream/shared/ui-utils';
 import { delay, unSanitizeXml } from '@jetstream/shared/utils';
 import { SplitWrapper as Split } from '@jetstream/splitjs';
-import { FileExtAllTypes, ListMetadataResult, Maybe, SalesforceOrgUi } from '@jetstream/types';
+import { FileExtAllTypes, ListMetadataResult, Maybe, MetadataEndpoint, SalesforceOrgUi } from '@jetstream/types';
 import { AutoFullHeightContainer, Checkbox, FileDownloadModal, Modal, Spinner, TreeItems } from '@jetstream/ui';
 import { fromJetstreamEvents, useAmplitude } from '@jetstream/ui-core';
 import { applicationCookieState, googleDriveAccessState } from '@jetstream/ui/app-state';
 import Editor, { DiffEditor } from '@monaco-editor/react';
 import { useAtomValue } from 'jotai';
+import JSZip from 'jszip';
 import type { editor } from 'monaco-editor';
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
+import { DeployMetadataToRepoModal } from '../deploy-to-repo/DeployMetadataToRepoModal';
 import { DeployComparedMetadataModal } from './DeployComparedMetadataModal';
 import ViewOrCompareMetadataEditorSummary from './ViewOrCompareMetadataEditorSummary';
 import ViewOrCompareMetadataModalFooter from './ViewOrCompareMetadataModalFooter';
 import ViewOrCompareMetadataSidebar from './ViewOrCompareMetadataSidebar';
 import { useViewOrCompareMetadata } from './useViewOrCompareMetadata';
-import { DeployFromCompareMetadataItem, EditorType, FileItemMetadata, OrgType } from './viewOrCompareMetadataTypes';
+import { DeployFromCompareMetadataItem, EditorType, FileItemMetadata, FilePropertiesWithContent, OrgType } from './viewOrCompareMetadataTypes';
 import { generateExport, getDeployMetadataFromComparisonTree, getEditorLanguage } from './viewOrCompareMetadataUtils';
 
 export interface ViewOrCompareMetadataModalProps {
@@ -33,6 +35,7 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
   const editorRef = useRef<editor.IStandaloneCodeEditor>(null);
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor>(null);
   const [targetOrg, setTargetOrg] = useState<SalesforceOrgUi | null>(null);
+  const [targetEndpoint, setTargetEndpoint] = useState<MetadataEndpoint | null>(null);
 
   const [activeFile, setActiveFile] = useState<TreeItems<FileItemMetadata> | null>(null);
   const [activeFileType, setActiveFileType] = useState<string>('xml');
@@ -66,7 +69,10 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
     items: [],
   });
 
-  const mainModalOpen = !downloadFileModalConfig.open && !deployConfirmationModalConfig.open;
+  const [repoDeployModalOpen, setRepoDeployModalOpen] = useState(false);
+  const [repoDeployFiles, setRepoDeployFiles] = useState<{ path: string; content: string }[]>([]);
+
+  const mainModalOpen = !downloadFileModalConfig.open && !deployConfirmationModalConfig.open && !repoDeployModalOpen;
 
   const {
     fetchMetadata,
@@ -95,7 +101,7 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
   const setActiveFileContent = useCallback(
     async (currentActiveFile: TreeItems<FileItemMetadata>) => {
       // TODO: can we cache previously used files to avoid async operation?
-      if (currentActiveFile.meta?.source && sourceResults) {
+      if (currentActiveFile.meta?.source && sourceResultFiles) {
         try {
           setActiveSourceContent(unSanitizeXml(currentActiveFile.meta.source.content || ''));
           setActiveFileType(getEditorLanguage(currentActiveFile.meta.source));
@@ -104,7 +110,7 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
           logger.warn('[VIEW OR COMPARE][FILE LOAD ERROR][SOURCE]', ex);
         }
       }
-      if (targetResults) {
+      if (targetResultFiles) {
         try {
           setActiveTargetContent(unSanitizeXml(currentActiveFile.meta?.target?.content || ''));
         } catch (ex) {
@@ -113,22 +119,22 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
         }
       }
     },
-    [sourceResults, targetResults],
+    [sourceResultFiles, targetResultFiles],
   );
 
   useEffect(() => {
     if (activeFile) {
       setActiveFileContent(activeFile);
     }
-  }, [activeFile, setActiveFileContent, sourceResults, targetResults]);
+  }, [activeFile, setActiveFileContent, sourceResultFiles, targetResultFiles]);
 
   useEffect(() => {
-    if (sourceResults && targetResults) {
+    if (sourceResultFiles && targetResultFiles) {
       setEditorType('DIFF');
-    } else if (sourceResults) {
+    } else if (sourceResultFiles) {
       setEditorType('SOURCE');
     }
-  }, [sourceResults, targetResults]);
+  }, [sourceResultFiles, targetResultFiles]);
 
   useNonInitialEffect(() => {
     if (editorType === 'SOURCE' && editorRef.current) {
@@ -184,32 +190,57 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
 
   function handleTargetOrg(org: SalesforceOrgUi) {
     setTargetOrg(org);
+    setTargetEndpoint({ type: 'ORG', org });
     fetchMetadata(org, 'TARGET');
   }
 
+  function handleTargetEndpointChange(endpoint: MetadataEndpoint) {
+    setTargetEndpoint(endpoint);
+    if (endpoint.type === 'ORG') {
+      setTargetOrg(endpoint.org);
+    }
+    fetchMetadata(endpoint, 'TARGET');
+  }
+
   function handleReload() {
-    sourceOrg && fetchMetadata(sourceOrg, 'SOURCE');
-    targetOrg && fetchMetadata(targetOrg, 'TARGET');
+    fetchMetadata(sourceOrg, 'SOURCE');
+    if (targetEndpoint) {
+      fetchMetadata(targetEndpoint, 'TARGET');
+    }
   }
 
   async function handleDownload(which: OrgType) {
     const fileNameParts = ['metadata-package'];
-    if (which === 'SOURCE' && sourceResults) {
-      setDownloadFileModalConfig({
-        open: true,
-        org: sourceOrg,
-        data: await sourceResults.generateAsync({ type: 'arraybuffer', compressionOptions: { level: 5 } }),
-        fileNameParts,
-        allowedTypes: ['zip'],
-      });
-    } else if (targetResults) {
-      setDownloadFileModalConfig({
-        open: true,
-        org: targetOrg,
-        data: await targetResults.generateAsync({ type: 'arraybuffer', compressionOptions: { level: 5 } }),
-        fileNameParts,
-        allowedTypes: ['zip'],
-      });
+
+    /** Build a JSZip from pre-populated fileProperties (used for repo sources) */
+    async function buildZipFromFileProperties(props: FilePropertiesWithContent[]): Promise<ArrayBuffer> {
+      const zip = new JSZip();
+      for (const file of props) {
+        if (file.content) {
+          zip.file(file.fileName, file.content);
+        }
+      }
+      return zip.generateAsync({ type: 'arraybuffer', compressionOptions: { level: 5 } });
+    }
+
+    if (which === 'SOURCE') {
+      const data = sourceResults
+        ? await sourceResults.generateAsync({ type: 'arraybuffer', compressionOptions: { level: 5 } })
+        : sourceResultFiles
+          ? await buildZipFromFileProperties(sourceResultFiles)
+          : null;
+      if (data) {
+        setDownloadFileModalConfig({ open: true, org: sourceOrg, data, fileNameParts, allowedTypes: ['zip'] });
+      }
+    } else {
+      const data = targetResults
+        ? await targetResults.generateAsync({ type: 'arraybuffer', compressionOptions: { level: 5 } })
+        : targetResultFiles
+          ? await buildZipFromFileProperties(targetResultFiles)
+          : null;
+      if (data) {
+        setDownloadFileModalConfig({ open: true, org: targetOrg, data, fileNameParts, allowedTypes: ['zip'] });
+      }
     }
   }
 
@@ -226,7 +257,26 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
     }
   }
 
-  function handleDeployToTarget() {
+  async function handleDeployToTarget() {
+    if (targetEndpoint?.type === 'REPO') {
+      // Build file list by iterating the zip directly so companion -meta.xml files
+      // (present in the zip but not in fileProperties) are included.
+      const repoFiles: { path: string; content: string }[] = [];
+      if (sourceResults) {
+        for (const [zipPath, zipEntry] of Object.entries(sourceResults.files)) {
+          if (zipEntry.dir || zipPath === 'package.xml') {
+            continue;
+          }
+          repoFiles.push({
+            path: zipPath.startsWith('unpackaged/') ? zipPath.replace(/^unpackaged\//, 'force-app/main/default/') : `force-app/main/default/${zipPath}`,
+            content: await zipEntry.async('string'),
+          });
+        }
+      }
+      setRepoDeployFiles(repoFiles);
+      setRepoDeployModalOpen(true);
+      return;
+    }
     setDeployConfirmationModalConfig({ open: true, targetOrg, items: getDeployMetadataFromComparisonTree(files) });
   }
 
@@ -265,6 +315,13 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
           trackEvent={trackEvent}
         />
       )}
+      {repoDeployModalOpen && (
+        <DeployMetadataToRepoModal
+          sourceOrg={sourceOrg}
+          preloadedFiles={repoDeployFiles}
+          onClose={() => setRepoDeployModalOpen(false)}
+        />
+      )}
       {deployConfirmationModalConfig.open && deployConfirmationModalConfig.targetOrg && (
         <DeployComparedMetadataModal
           sourceOrg={sourceOrg}
@@ -284,8 +341,8 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
           header={chromeExtension ? 'View Metadata' : 'View or Compare Metadata'}
           footer={
             <ViewOrCompareMetadataModalFooter
-              hasSourceMetadata={!!sourceResults}
-              hasTargetMetadata={!!targetResults}
+              hasSourceMetadata={!!sourceResultFiles}
+              hasTargetMetadata={!!targetResultFiles}
               hasTargetMetadataContent={!!targetResultFiles && targetResultFiles?.length > 1}
               sourceLoading={sourceLoading}
               sourceLastChecked={sourceLastChecked}
@@ -328,14 +385,15 @@ export const ViewOrCompareMetadataModal = ({ sourceOrg, selectedMetadata, onClos
                     files={files}
                     targetOrg={targetOrg}
                     targetLoading={targetLoading}
-                    hasSourceResults={!!sourceResults}
-                    hasTargetResults={!!targetResults}
+                    hasSourceResults={!!sourceResultFiles}
+                    hasTargetResults={!!targetResultFiles}
                     sourceError={sourceError}
                     targetError={targetError}
                     isChromeExtension={chromeExtension}
                     onEditorTypeChange={setEditorType}
                     onSelectedFile={setActiveFile}
                     onTargetOrgChange={handleTargetOrg}
+                    onTargetEndpointChange={handleTargetEndpointChange}
                     treeSettingsContent={
                       editorType === 'DIFF' ? (
                         <div className="slds-m-top_x-small slds-p-left_xx-small">

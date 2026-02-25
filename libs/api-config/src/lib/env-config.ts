@@ -243,6 +243,12 @@ const envSchema = z.object({
   WEB_EXTENSION_ID_CHROME: z.string().optional().default(''),
   WEB_EXTENSION_ID_MOZILLA: z.string().optional().default(''),
   /**
+   * GitHub OAuth — for connecting repo sources
+   */
+  GITHUB_CLIENT_ID: z.string().optional().default(''),
+  GITHUB_CLIENT_SECRET: z.string().optional().default(''),
+  GITHUB_CALLBACK_URL: z.string().optional().default(''),
+  /**
    * STRIPE
    */
   STRIPE_API_KEY: z.string().optional(),

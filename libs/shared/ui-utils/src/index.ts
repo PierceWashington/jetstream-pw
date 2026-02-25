@@ -1,3 +1,4 @@
+export * from './lib/addRepoSource';
 export * from './lib//hooks/useCsrfToken';
 export * from './lib/hooks/useBrowserNotifications';
 export * from './lib/hooks/useCombinedRefs';

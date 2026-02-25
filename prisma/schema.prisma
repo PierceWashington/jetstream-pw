@@ -409,6 +409,9 @@ model JetstreamOrganization {
   createdAt   DateTime        @default(now()) @db.Timestamp(6)
   updatedAt   DateTime        @updatedAt
 
+  repositorySources RepositorySource[]
+  repositories      Repository[]
+
   @@map("jetstream_organization")
 }
 
@@ -598,4 +601,50 @@ model AuditLog {
   @@index([action, createdAt])
   @@index([resource, resourceId, createdAt])
   @@map("audit_log")
+}
+
+enum RepositorySourceType {
+  GITHUB
+  BITBUCKET
+  AZURE_DEVOPS
+}
+
+model RepositorySource {
+  id                      String                 @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  jetstreamUserId         String                 @db.VarChar
+  jetstreamOrganizationId String?                @db.Uuid
+  type                    RepositorySourceType
+  userId                  String                 @db.VarChar
+  userName                String                 @db.VarChar
+  description             String?                @db.VarChar
+  accessToken             String                 @db.VarChar
+  resourceUrl_repos       String?                @db.VarChar
+  createdAt               DateTime               @default(now()) @db.Timestamp(6)
+  updatedAt               DateTime               @updatedAt
+
+  jetstreamOrganization JetstreamOrganization? @relation(fields: [jetstreamOrganizationId], references: [id], onDelete: SetNull)
+  repositories          Repository[]
+
+  @@unique([jetstreamUserId, id], name: "uniqueRepoSource", map: "unique_repo_source")
+  @@map("repository_source")
+}
+
+model Repository {
+  id                      String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  jetstreamUserId         String   @db.VarChar
+  jetstreamOrganizationId String?  @db.Uuid
+  sourceId                String   @db.Uuid
+  sourceOrgName           String?  @db.VarChar
+  sourceOrgId             String?  @db.VarChar
+  path                    String   @db.VarChar
+  color                   String?  @db.VarChar(10)
+  label                   String?  @db.VarChar(100)
+  createdAt               DateTime @default(now()) @db.Timestamp(6)
+  updatedAt               DateTime @updatedAt
+
+  source                RepositorySource       @relation(fields: [sourceId], references: [id])
+  jetstreamOrganization JetstreamOrganization? @relation(fields: [jetstreamOrganizationId], references: [id], onDelete: SetNull)
+
+  @@unique([jetstreamUserId, id], name: "uniqueRepo", map: "unique_repo")
+  @@map("repository")
 }

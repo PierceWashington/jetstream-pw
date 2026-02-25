@@ -1,5 +1,15 @@
-import { COMMON_METADATA_TYPES, ListMetadataQueryExtended } from '@jetstream/connected-ui';
-import { AllUser, ChangeSet, CommonUser, ListItem, MetadataObject, SalesforceUser, YesNo } from '@jetstream/types';
+import { COMMON_METADATA_TYPES, ListMetadataQueryExtended, ListMetadataResultItem } from '@jetstream/connected-ui';
+import {
+  AllUser,
+  ChangeSet,
+  CommonUser,
+  JetstreamRepoSourceUi,
+  ListItem,
+  MetadataEndpoint,
+  MetadataObject,
+  SalesforceUser,
+  YesNo,
+} from '@jetstream/types';
 import { isAfter } from 'date-fns/isAfter';
 import { isSameDay } from 'date-fns/isSameDay';
 import { atom } from 'jotai';
@@ -99,6 +109,28 @@ export const listMetadataQueriesSelector = atom<ListMetadataQueryExtended[]>((ge
       };
     });
 });
+
+/** The metadata type currently expanded/active in the right entries pane */
+export const activeMetadataTypeState = atomWithReset<string | null>(null);
+
+/** Loaded entries per type: Record<xmlName, ListMetadataResultItem> */
+export const loadedEntriesPerTypeState = atomWithReset<Record<string, ListMetadataResultItem>>({});
+
+/**
+ * Per-entry selection: Record<xmlName, Set<fullName> | null>
+ * null means "all entries selected for this type"
+ * an explicit Set means only those specific entries are selected
+ */
+export const selectedEntriesPerTypeState = atomWithReset<Record<string, Set<string> | null>>({});
+
+/** Connected repo sources (GitHub, Bitbucket, etc.) for the current user */
+export const repoSourcesState = atom<JetstreamRepoSourceUi[]>([]);
+
+/** The selected source endpoint (defaults to selected org, can be a repo) */
+export const selectedSourceEndpointState = atomWithReset<MetadataEndpoint | null>(null);
+
+/** The selected target endpoint for compare operations */
+export const selectedTargetEndpointState = atomWithReset<MetadataEndpoint | null>(null);
 
 export const amplitudeSubmissionSelector = atom((get) => {
   const metadataSelectionType = get(metadataSelectionTypeState);

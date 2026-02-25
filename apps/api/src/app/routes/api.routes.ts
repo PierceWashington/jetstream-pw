@@ -6,6 +6,9 @@ import { getAnnouncements } from '../announcements';
 import { routeDefinition as dataSyncController } from '../controllers/data-sync.controller';
 import { routeDefinition as orgGroupController } from '../controllers/org-groups.controller';
 import { routeDefinition as orgsController } from '../controllers/orgs.controller';
+import { routeDefinition as repoContentController } from '../controllers/repo-content.controller';
+import { routeDefinition as repoSourceController } from '../controllers/repo-source.controller';
+import { routeDefinition as reposController } from '../controllers/repos.controller';
 import { routeDefinition as salesforceApiReqController } from '../controllers/salesforce-api-requests.controller';
 import { routeDefinition as bulkApiController } from '../controllers/sf-bulk-api.controller';
 import { routeDefinition as bulkQuery20ApiController } from '../controllers/sf-bulk-query-20-api.controller';
@@ -204,6 +207,36 @@ routes.delete('/bulk-query/:jobId', bulkQuery20ApiController.deleteJob.controlle
  * ************************************
  */
 routes.get('/salesforce-api/requests', salesforceApiReqController.getSalesforceApiRequests.controllerFn());
+
+/**
+ * ************************************
+ * Repo Source Routes (GitHub, Bitbucket, etc.)
+ * ************************************
+ */
+routes.get('/repo-sources', repoSourceController.getRepoSources.controllerFn());
+routes.get('/repo-sources/:id', repoSourceController.getRepoSourceById.controllerFn());
+routes.delete('/repo-sources/:id', repoSourceController.deleteRepoSource.controllerFn());
+
+/**
+ * ************************************
+ * Repository Routes
+ * ************************************
+ */
+routes.get('/repos', reposController.getRepos.controllerFn());
+routes.patch('/repos/:id', reposController.updateRepo.controllerFn());
+routes.delete('/repos/:id', reposController.deleteRepo.controllerFn());
+
+/**
+ * ************************************
+ * Repo Content Routes (branches, file tree, file contents, commit)
+ * ************************************
+ */
+routes.get('/repo-content/branches', repoContentController.getBranches.controllerFn());
+routes.get('/repo-content/tree', repoContentController.getFileTree.controllerFn());
+routes.get('/repo-content/file', repoContentController.getFileContent.controllerFn());
+routes.post('/repo-content/commit', repoContentController.commitFile.controllerFn());
+routes.post('/repo-content/branch', repoContentController.createBranch.controllerFn());
+routes.post('/repo-content/commit-batch', repoContentController.commitFiles.controllerFn());
 
 /**
  * ************************************

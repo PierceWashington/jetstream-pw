@@ -1,10 +1,13 @@
-import { Maybe, SalesforceOrgUi } from '@jetstream/types';
+import { JetstreamRepoSourceUi, JetstreamRepoUi, Maybe, MetadataEndpoint, SalesforceOrgUi } from '@jetstream/types';
 import { RadioButton, RadioGroup, ScopedNotification, Spinner, Tree, TreeItems } from '@jetstream/ui';
 import { OrgsCombobox } from '@jetstream/ui-core';
 import { salesforceOrgsOmitSelectedState } from '@jetstream/ui/app-state';
 import { useAtomValue } from 'jotai';
-import { FunctionComponent } from 'react';
+import { FunctionComponent, useState } from 'react';
+import { RepoSourcePicker } from '../repo-components/RepoSourcePicker';
 import { FileItemMetadata } from './viewOrCompareMetadataTypes';
+
+type CompareMode = 'org' | 'repo';
 
 export interface ViewOrCompareMetadataSidebarProps {
   editorType: 'SOURCE' | 'TARGET' | 'DIFF';
@@ -19,7 +22,10 @@ export interface ViewOrCompareMetadataSidebarProps {
   treeSettingsContent?: React.ReactNode;
   onEditorTypeChange: (value: 'SOURCE' | 'TARGET' | 'DIFF') => void;
   onSelectedFile: (item: TreeItems<FileItemMetadata>) => void;
+  /** Called when an org is selected as the compare target */
   onTargetOrgChange: (org: SalesforceOrgUi) => void;
+  /** Called when a repo endpoint is selected as the compare target */
+  onTargetEndpointChange?: (endpoint: MetadataEndpoint) => void;
 }
 
 export const ViewOrCompareMetadataSidebar: FunctionComponent<ViewOrCompareMetadataSidebarProps> = ({
@@ -36,8 +42,10 @@ export const ViewOrCompareMetadataSidebar: FunctionComponent<ViewOrCompareMetada
   onEditorTypeChange,
   onSelectedFile,
   onTargetOrgChange,
+  onTargetEndpointChange,
 }) => {
   const orgs = useAtomValue(salesforceOrgsOmitSelectedState);
+  const [compareMode, setCompareMode] = useState<CompareMode>('org');
 
   function handleSelectedFile(item: TreeItems<FileItemMetadata>) {
     if (item.meta) {
@@ -45,23 +53,62 @@ export const ViewOrCompareMetadataSidebar: FunctionComponent<ViewOrCompareMetada
     }
   }
 
+  function handleCompareModeChange(mode: CompareMode) {
+    setCompareMode(mode);
+  }
+
+  function handleRepoSelected(repoSource: JetstreamRepoSourceUi, repo: JetstreamRepoUi, branch: string) {
+    if (onTargetEndpointChange) {
+      onTargetEndpointChange({ type: 'REPO', repo, branch });
+    }
+  }
+
   return (
     <>
       {!isChromeExtension && (
         <>
+          <div className="slds-m-bottom_x-small">
+            <RadioGroup label="Compare with" isButtonGroup>
+              <RadioButton
+                name="compare-mode"
+                label="Org"
+                value="org"
+                checked={compareMode === 'org'}
+                onChange={() => handleCompareModeChange('org')}
+              />
+              <RadioButton
+                name="compare-mode"
+                label="Repository"
+                value="repo"
+                checked={compareMode === 'repo'}
+                disabled={!onTargetEndpointChange}
+                onChange={() => handleCompareModeChange('repo')}
+              />
+            </RadioGroup>
+          </div>
+
           <div className="slds-is-relative slds-m-bottom_x-small slds-m-right_x-small">
             {targetLoading && <Spinner />}
-            <OrgsCombobox
-              label="Compare metadata with different org"
-              hideLabel={false}
-              placeholder="Select an org"
-              orgs={orgs}
-              selectedOrg={targetOrg}
-              disabled={targetLoading || !!sourceError}
-              minWidth={0}
-              onSelected={onTargetOrgChange}
-            />
+            {compareMode === 'org' ? (
+              <OrgsCombobox
+                label="Compare metadata with different org"
+                hideLabel={false}
+                placeholder="Select an org"
+                orgs={orgs}
+                selectedOrg={targetOrg}
+                disabled={targetLoading || !!sourceError}
+                minWidth={0}
+                onSelected={onTargetOrgChange}
+              />
+            ) : (
+              <RepoSourcePicker
+                label="Compare metadata with repository"
+                disabled={targetLoading || !!sourceError}
+                onRepoSelected={handleRepoSelected}
+              />
+            )}
           </div>
+
           <div>
             <RadioGroup isButtonGroup>
               <RadioButton
@@ -99,7 +146,7 @@ export const ViewOrCompareMetadataSidebar: FunctionComponent<ViewOrCompareMetada
       )}
       {targetError && (
         <ScopedNotification theme="error" className="slds-m-top_medium">
-          There was an error getting metadata from the target org: {targetError}
+          There was an error getting metadata from the target: {targetError}
         </ScopedNotification>
       )}
       {treeSettingsContent && !sourceError && !targetError && treeSettingsContent}

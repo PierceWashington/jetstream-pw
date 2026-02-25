@@ -2,13 +2,14 @@ import { METADATA_TYPES_WITH_FOLDERS } from '@jetstream/shared/constants';
 import { retrieveMetadataFromListMetadata } from '@jetstream/shared/data';
 import { pollRetrieveMetadataResultsUntilDone, useBrowserNotifications } from '@jetstream/shared/ui-utils';
 import { getErrorMessage } from '@jetstream/shared/utils';
-import { ListMetadataResult, SalesforceOrgUi } from '@jetstream/types';
+import { ListMetadataResult, MetadataEndpoint, SalesforceOrgUi } from '@jetstream/types';
 import { TreeItems } from '@jetstream/ui';
 import { applicationCookieState } from '@jetstream/ui/app-state';
 import { useAtom } from 'jotai';
 import JSZip from 'jszip';
 import isString from 'lodash/isString';
 import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { RepoInfo, useRepoMetadata } from '../hooks/useRepoMetadata';
 import { FileItemMetadata, FilePropertiesWithContent, OrgType } from './viewOrCompareMetadataTypes';
 import { buildTree, populateFileContents } from './viewOrCompareMetadataUtils';
 
@@ -17,7 +18,7 @@ type LoadStatus = 'Not Started' | 'Loading' | 'Success' | 'Failed';
 type Action =
   | { type: 'FETCH'; payload: { which: OrgType } }
   | { type: 'LAST_CHECKED'; payload: { which: OrgType } }
-  | { type: 'FETCH_SUCCESS'; payload: { which: OrgType; data: JSZip; fileProperties: FilePropertiesWithContent[] } }
+  | { type: 'FETCH_SUCCESS'; payload: { which: OrgType; data: JSZip | null; fileProperties: FilePropertiesWithContent[] } }
   | { type: 'FETCH_ERROR'; payload: { which: OrgType; error: string } };
 
 interface State {
@@ -36,8 +37,6 @@ interface State {
   targetError?: string | null;
 
   files: TreeItems<FileItemMetadata | null>[];
-
-  // fatalError?: string | null;
 }
 
 function reducer(state: State, action: Action): State {
@@ -57,8 +56,8 @@ function reducer(state: State, action: Action): State {
         };
       } else {
         let files = state.files;
-        // if target org was changed, clear out prior target comparison data
-        if (state.targetResults) {
+        // if target was changed, clear out prior target comparison data
+        if (state.targetResults || state.targetResultFiles) {
           files = buildTree(state.sourceResultFiles, undefined);
         }
         return {
@@ -73,15 +72,9 @@ function reducer(state: State, action: Action): State {
     }
     case 'LAST_CHECKED': {
       if (action.payload.which === 'SOURCE') {
-        return {
-          ...state,
-          sourceLastChecked: new Date(),
-        };
+        return { ...state, sourceLastChecked: new Date() };
       } else {
-        return {
-          ...state,
-          targetLastChecked: new Date(),
-        };
+        return { ...state, targetLastChecked: new Date() };
       }
     }
     case 'FETCH_SUCCESS': {
@@ -130,13 +123,6 @@ function reducer(state: State, action: Action): State {
   }
 }
 
-/**
- * Give an org and a changeset name
- * Retrieve and re-deploy the metadata to the org while adding to a changeset
- *
- * @param selectedOrg
- * @param changesetName
- */
 export function useViewOrCompareMetadata({ selectedMetadata }: { selectedMetadata: Record<string, ListMetadataResult[]> }) {
   const isMounted = useRef(true);
 
@@ -174,6 +160,7 @@ export function useViewOrCompareMetadata({ selectedMetadata }: { selectedMetadat
   });
   const [{ serverUrl }] = useAtom(applicationCookieState);
   const { notifyUser } = useBrowserNotifications(serverUrl);
+  const { fetchRepoFiles } = useRepoMetadata();
 
   useEffect(() => {
     isMounted.current = true;
@@ -182,7 +169,8 @@ export function useViewOrCompareMetadata({ selectedMetadata }: { selectedMetadat
     };
   }, []);
 
-  const fetchMetadata = useCallback(
+  /** Fetch metadata from a Salesforce org */
+  const fetchOrgMetadata = useCallback(
     async (org: SalesforceOrgUi, which: OrgType) => {
       dispatch({ type: 'FETCH', payload: { which } });
 
@@ -222,6 +210,51 @@ export function useViewOrCompareMetadata({ selectedMetadata }: { selectedMetadat
       }
     },
     [notifyUser, selectedMetadata],
+  );
+
+  /** Fetch metadata from a GitHub repo */
+  const fetchRepoMetadata = useCallback(
+    async (repoInfo: RepoInfo, which: OrgType) => {
+      dispatch({ type: 'FETCH', payload: { which } });
+
+      try {
+        const fileProperties = await fetchRepoFiles(repoInfo, selectedMetadata);
+
+        if (isMounted.current) {
+          dispatch({ type: 'FETCH_SUCCESS', payload: { which, data: null, fileProperties } });
+          notifyUser('Your metadata is ready to view', { tag: 'view-or-compare' });
+        }
+      } catch (ex) {
+        notifyUser('There was an error obtaining metadata from the repository', { body: getErrorMessage(ex), tag: 'view-or-compare' });
+        dispatch({ type: 'FETCH_ERROR', payload: { which, error: getErrorMessage(ex) } });
+      }
+    },
+    [fetchRepoFiles, notifyUser, selectedMetadata],
+  );
+
+  /**
+   * Fetch metadata from either an org or a repo endpoint.
+   * Pass a `SalesforceOrgUi` directly for backwards compatibility with org-only usage,
+   * or pass a `MetadataEndpoint` to support both org and repo sources.
+   */
+  const fetchMetadata = useCallback(
+    async (endpoint: SalesforceOrgUi | MetadataEndpoint, which: OrgType) => {
+      if ('uniqueId' in endpoint) {
+        // Backwards-compatible: plain SalesforceOrgUi passed directly
+        await fetchOrgMetadata(endpoint as SalesforceOrgUi, which);
+      } else if (endpoint.type === 'ORG') {
+        await fetchOrgMetadata(endpoint.org, which);
+      } else {
+        const { repo, branch } = endpoint;
+        const [owner, repoName] = repo.path.split('/');
+        if (owner && repoName) {
+          await fetchRepoMetadata({ repoSourceId: repo.sourceId, owner, repo: repoName, branch }, which);
+        } else {
+          dispatch({ type: 'FETCH_ERROR', payload: { which, error: 'Invalid repository path — expected "owner/repo" format' } });
+        }
+      }
+    },
+    [fetchOrgMetadata, fetchRepoMetadata],
   );
 
   return {

@@ -394,6 +394,47 @@ export type AddOrgHandlerFn = (
   callback: (org: SalesforceOrgUi) => void,
 ) => void;
 
+export type RepoSource = 'github' | 'bitbucket' | 'azure';
+
+export interface JetstreamRepoSourceUi {
+  id: string;
+  type: RepoSource;
+  userId: string;
+  userName: string;
+  description?: string;
+  accessToken?: string;
+  /** Refresh token for GitHub Apps with token expiry enabled; empty string if not applicable. */
+  refreshToken?: string;
+  resourceUrls?: {
+    repositories: string;
+  };
+  jetstreamOrganizationId?: Maybe<string>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface JetstreamRepoUi {
+  id: string;
+  sourceId: string;
+  source: RepoSource;
+  jetstreamOrganizationId?: Maybe<string>;
+  userId: string;
+  userName: string;
+  /** GitHub owner/repo path, e.g. "myorg/myrepo" */
+  path: string;
+  label?: string;
+  orgId?: string;
+  orgName?: string;
+  accessToken?: string;
+  color?: string | null;
+  connectionError?: string | null;
+  resourceUrls?: {
+    repositories: string;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export type GoogleUserInfo = {
   id: string;
   email: string;

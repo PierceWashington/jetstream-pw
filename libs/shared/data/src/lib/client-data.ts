@@ -38,6 +38,8 @@ import {
   HttpMethod,
   InputReadFileContent,
   JetstreamPricesByLookupKey,
+  JetstreamRepoSourceUi,
+  JetstreamRepoUi,
   ListMetadataQuery,
   ListMetadataResult,
   ListMetadataResultRaw,
@@ -1209,6 +1211,123 @@ export async function downloadBinaryAttachmentsZip_WEB_EXTENSION(
       return response as any;
     },
   );
+}
+
+/**
+ * ************************************
+ * Repo Source API
+ * ************************************
+ */
+
+export interface GitHubBranch {
+  name: string;
+  commit: { sha: string; url: string };
+  protected: boolean;
+}
+
+export interface GitHubContentItem {
+  type: 'file' | 'dir' | 'symlink' | 'submodule';
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  url: string;
+  html_url: string;
+  git_url: string;
+  download_url: string | null;
+  content?: string;
+  encoding?: string;
+}
+
+export interface CommitFileResult {
+  content: GitHubContentItem;
+  commit: { sha: string; message: string; html_url: string };
+}
+
+export async function getRepoSources(): Promise<JetstreamRepoSourceUi[]> {
+  return handleRequest({ method: 'GET', url: '/api/repo-sources' }).then(unwrapResponseIgnoreCache);
+}
+
+export async function deleteRepoSource(id: string): Promise<void> {
+  return handleRequest({ method: 'DELETE', url: `/api/repo-sources/${id}` }).then(unwrapResponseIgnoreCache);
+}
+
+export async function getRepos(): Promise<JetstreamRepoUi[]> {
+  return handleRequest({ method: 'GET', url: '/api/repos' }).then(unwrapResponseIgnoreCache);
+}
+
+export async function deleteRepo(id: string): Promise<void> {
+  return handleRequest({ method: 'DELETE', url: `/api/repos/${id}` }).then(unwrapResponseIgnoreCache);
+}
+
+export async function getRepoBranches(repoSourceId: string, owner: string, repo: string): Promise<GitHubBranch[]> {
+  return handleRequest({ method: 'GET', url: '/api/repo-content/branches', params: { repoSourceId, owner, repo } }).then(
+    unwrapResponseIgnoreCache,
+  );
+}
+
+export async function getRepoFileTree(
+  repoSourceId: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  path = '',
+): Promise<GitHubContentItem[]> {
+  return handleRequest({
+    method: 'GET',
+    url: '/api/repo-content/tree',
+    params: { repoSourceId, owner, repo, branch, path },
+  }).then(unwrapResponseIgnoreCache);
+}
+
+export async function getRepoFileContent(
+  repoSourceId: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  path: string,
+): Promise<string> {
+  return handleRequest<{ content: string }>({
+    method: 'GET',
+    url: '/api/repo-content/file',
+    params: { repoSourceId, owner, repo, branch, path },
+  })
+    .then(unwrapResponseIgnoreCache)
+    .then(({ content }) => content);
+}
+
+export async function commitRepoFile(payload: {
+  repoSourceId: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  path: string;
+  content: string;
+  message: string;
+  sha?: string;
+}): Promise<CommitFileResult> {
+  return handleRequest({ method: 'POST', url: '/api/repo-content/commit', data: payload }).then(unwrapResponseIgnoreCache);
+}
+
+export async function createRepoBranch(payload: {
+  repoSourceId: string;
+  owner: string;
+  repo: string;
+  newBranch: string;
+  sourceBranch: string;
+}): Promise<GitHubBranch> {
+  return handleRequest({ method: 'POST', url: '/api/repo-content/branch', data: payload }).then(unwrapResponseIgnoreCache);
+}
+
+export async function commitRepoFiles(payload: {
+  repoSourceId: string;
+  owner: string;
+  repo: string;
+  branch: string;
+  message: string;
+  files: { path: string; content: string }[];
+}): Promise<{ sha: string; html_url: string }> {
+  return handleRequest({ method: 'POST', url: '/api/repo-content/commit-batch', data: payload }).then(unwrapResponseIgnoreCache);
 }
 
 export async function submitUserFeedback({
